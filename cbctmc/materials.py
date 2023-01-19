@@ -63,7 +63,7 @@ def getf2(material, energy):
     compounds = parseMaterial(material)
     f2final = np.zeros(len(energy))
     x = 2 * 20.6074 * energy / (5.10998918 * 1e5)  # dimensionless x(E) used for form factors
-    par = np.loadtxt("tables/ParAnalyRayCrossSect")
+    par = np.loadtxt("../tables/ParAnalyRayCrossSect")
     for com in range(len(compounds)):
         formula = compounds[com][1]
         mat = xcom.MaterialFactory.from_formula(formula)
@@ -226,7 +226,7 @@ def getJ0(material):
     # see [Penelope 2006, Sec. 2.3, especially 2.3.1], tables/compton is taken from:
     #      [F.Biggs, L.B.Mendelsohn, J.B.Mann 1975, Hartree Fock compten profiles for the elements]
     compounds = parseMaterial(material)
-    compten = np.genfromtxt("tables/compten", skip_header=1, usecols=range(19), delimiter="\t")
+    compten = np.genfromtxt("../tables/compten", skip_header=1, usecols=range(19), delimiter="\t")
     data = []
     alpha = 1/(137.036)
     for i in range(len(compounds)):

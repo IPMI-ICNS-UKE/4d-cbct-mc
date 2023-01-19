@@ -206,7 +206,7 @@ def getNPhoton(para):
     cbct_sim_24e8_t = sitk.GetArrayFromImage(cbct_sim_24e8)
     new = sitk.GetImageFromArray(cbct_sim_24e8_t*para[0]+para[1])
     new.CopyInformation(cbct_sim_24e8)
-    sitk.WriteImage(new, "calibratedphantom.mha")
+    sitk.WriteImage(new, "../calibratedphantom.mha")
     cbct_sim_24e8 = cbct_sim_24e8_t
 
     x = np.ones((256, 256, 256)) * -2000
