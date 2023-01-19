@@ -410,7 +410,7 @@ def writeXML(path, geo_filename, src_to_iso, src_to_det, no, lat_displacement):
 def writeInputFile(path, filename, sim_filename, sim_air_filename, vox_filename,
                    vox_air_filename, in_filename, in_air_filename, ct_size, ct_spacing, photons,
                    src_to_iso, src_to_det, no, lat_displacement, det_pix_x, det_pix_y, det_pixel_size,
-                   det_pix_x_halffan, air=False):
+                   det_pix_x_halffan, air=False, random_seed=42):
     # writes input file according to the MC-GPU standard, commented material files are used for Catphan 604 calibration
     print("Writing input file")
     size_x = ct_size[0] * ct_spacing[0]
@@ -425,7 +425,7 @@ def writeInputFile(path, filename, sim_filename, sim_air_filename, vox_filename,
 
     text += str(photons) + " # TOTAL NUMBER OF HISTORIES, OR SIMULATION TIME IN SECONDS IF VALUE < 100000\n"
 
-    text += ("1234567890                      # RANDOM SEED (ranecu PRNG)\n0                               "
+    text += (f"{random_seed}                      # RANDOM SEED (ranecu PRNG)\n0                               "
              + "# GPU NUMBER TO USE WHEN MPI IS NOT USED, OR TO BE AVOIDED IN MPI RUNS\n128         "
              + "# GPU THREADS PER CUDA BLOCK (multiple of 32)\n150                             "
              + "# SIMULATED HISTORIES PER GPU THREAD\n"
@@ -566,9 +566,10 @@ def runSimulation(path, gpu_id: int = 0):
 @click.option('--force_create_object', default=False, help='Set force_create_object=True to redo the object')
 @click.option('--force_simulate', default=False, help='Set force_simulate=True to redo simulation')
 @click.option('--gpu_id', default=0, type=click.INT, help='PCI ID of GPU for MC simulation')
+@click.option('--random_seed', default=42, type=click.INT, help='Random seed for MC simulation')
 def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
          det_pix_x, det_pix_y, lat_displacement, src_to_detector, src_to_iso, photons, force_rerun, force_segment,
-         force_create_object, force_simulate, gpu_id):
+         force_create_object, force_simulate, gpu_id, random_seed):
     # #### Setup #############################################
     # create Files, define paths
     if not os.path.exists(path_out):
@@ -626,11 +627,11 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
         writeInputFile(input_path, filename, sim_filename, sim_air_filename, vox_filename,
                        vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(), photons,
                        src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
-                       det_pix_y, det_pix_size, det_pix_x_halffan)
+                       det_pix_y, det_pix_size, det_pix_x_halffan, random_seed=random_seed)
         writeInputFile(input_path, filename, sim_filename, sim_air_filename, vox_filename,
                        vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(), photons,
                        src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
-                       det_pix_y, det_pix_size, det_pix_x_halffan, air=True)
+                       det_pix_y, det_pix_size, det_pix_x_halffan, air=True, random_seed=random_seed)
         runSimulation(path_out, gpu_id=gpu_id)
         # create log file
         with open(process_path + "/" + log_filename, 'wb') as f:
