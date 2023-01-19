@@ -565,9 +565,10 @@ def runSimulation(path, gpu_id: int = 0):
 @click.option('--force_segment', default=False, help='Set force_segment=True to redo segmentation')
 @click.option('--force_create_object', default=False, help='Set force_create_object=True to redo the object')
 @click.option('--force_simulate', default=False, help='Set force_simulate=True to redo simulation')
+@click.option('--gpu_id', default=0, type=click.INT, help='PCI ID of GPU for MC simulation')
 def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
          det_pix_x, det_pix_y, lat_displacement, src_to_detector, src_to_iso, photons, force_rerun, force_segment,
-         force_create_object, force_simulate):
+         force_create_object, force_simulate, gpu_id):
     # #### Setup #############################################
     # create Files, define paths
     if not os.path.exists(path_out):
@@ -630,7 +631,7 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
                        vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(), photons,
                        src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
                        det_pix_y, det_pix_size, det_pix_x_halffan, air=True)
-        runSimulation(path_out)
+        runSimulation(path_out, gpu_id=gpu_id)
         # create log file
         with open(process_path + "/" + log_filename, 'wb') as f:
             pickle.dump([no_sim, det_pix_size, det_pix_x, det_pix_y, lat_displacement,
