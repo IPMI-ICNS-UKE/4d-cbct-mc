@@ -614,7 +614,7 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
     # #### Run ###############################################
     # Use TotalSegmentator to segment ct
     if not os.path.exists(seg_path + "/" + seg_filename) or force_segment or force_rerun:
-        createSegmentation(seg_path, seg_filename, path_ct_in, filename_ct_in)
+        createSegmentation(seg_path, seg_filename, path_ct_in, filename_ct_in, gpu_id=gpu_id)
     img_seg = sitk.ReadImage(seg_path + "/" + seg_filename)
 
     # Create Voxel Object
