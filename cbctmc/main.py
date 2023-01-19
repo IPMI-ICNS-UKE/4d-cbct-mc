@@ -141,14 +141,14 @@ def groupSegmentation(path):
     return total_seg
 
 
-def createSegmentation(path, seg_filename, path_ct_in, filename_ct_in):
+def createSegmentation(path, seg_filename, path_ct_in, filename_ct_in, gpu_id: int = 0):
     # Starts Total Segmentator with given CT Data
     file_path = path + "/" + seg_filename
     # remove old segmentation
     if os.path.exists(file_path):
         os.remove(file_path)
     # run segmentation (Look TotalSegmentator for details; URL: https://arxiv.org/abs/2208.05868.  arXiv: 2208.05868)
-    os.system('TotalSegmentator -i ' + path_ct_in + "/" + filename_ct_in + " -o " + path)
+    os.system(f'CUDA_VISIBLE_DEVICES={gpu_id} TotalSegmentator -i ' + path_ct_in + "/" + filename_ct_in + " -o " + path)
     # bring segmentation in desired format
     sitk.WriteImage(groupSegmentation(path), file_path)
 
