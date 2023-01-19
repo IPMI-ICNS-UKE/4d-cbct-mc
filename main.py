@@ -3,10 +3,12 @@ import SimpleITK as sitk
 import numpy as np
 import click
 import pickle
+from tqdm import tqdm
+import multiprocessing
 
 
 def segMapToBinary(name):
-    # Maps segmentation labels to an integer
+    # Maps segmentation labels from "Total Segmentator" to an integer
     arr = ["spleen",
            "kidney_right",
            "kidney_left",
@@ -127,11 +129,11 @@ def groupSegmentation(path):
     info_image = sitk.ReadImage(path + "/" + os.fsdecode(os.listdir(directory)[0]))
     size = info_image.GetSize()
     arr = np.zeros((size[2], size[1], size[0]))
-    for file in os.listdir(directory):
+    for file in tqdm(os.listdir(directory)):
         filename = os.fsdecode(file)
         img_ni = sitk.ReadImage(path + "/" + filename)
         img_np = sitk.GetArrayFromImage(img_ni)
-        img_np = np.flip(img_np, 2)
+        # img_np = np.flip(img_np, 2)
         arr = arr + img_np * segMapToBinary(filename.replace(".nii.gz", ""))
         os.remove(path + "/" + filename)
     total_seg = sitk.GetImageFromArray(arr)
@@ -140,6 +142,7 @@ def groupSegmentation(path):
 
 
 def createSegmentation(path, seg_filename, path_ct_in, filename_ct_in):
+    # Starts Total Segmentator with given CT Data
     file_path = path + "/" + seg_filename
     # remove old segmentation
     if os.path.exists(file_path):
@@ -150,7 +153,9 @@ def createSegmentation(path, seg_filename, path_ct_in, filename_ct_in):
     sitk.WriteImage(groupSegmentation(path), file_path)
 
 
-def segToMatFileNo(i):
+def segToMatFileNo(i, bar):
+    # maps Segmentation integers from segMapToBinary() on integeres representing Materials in the Input file
+    bar.update(1)
     if 1 <= i <= 4 or i == 10:
         return 3  # 'organs'
     elif 7 <= i <= 9 or i == 49 or 51 <= i <= 54:
@@ -176,19 +181,19 @@ def segToMatFileNo(i):
 
 
 def getMaterial(hu, mat):
-    if hu < -800:
+    if hu < -900:
         return "1 0.0012"
-    elif -800 <= hu < -200:
+    elif -900 <= hu < -250:
         if mat == 9:
             return "9 0.382"
         else:
             return "1 0.0012"
-    elif -200 <= hu < -20:
+    elif -250 <= hu < -20:
         if mat == 3:
             return "3 1.0"
         elif mat == 7:
             return "7 1.06"
-        elif mat == 10:
+        elif mat == 10 or mat == 9:
             return "10 1.03"
         elif mat == 14:
             return "14 1.04"
@@ -219,7 +224,7 @@ def getMaterial(hu, mat):
             return "12 1.03"
         else:
             return "2 1.05"
-    elif 100 <= hu < 160:
+    elif 100 <= hu < 300:
         if mat == 4 or mat == -1:
             return "5 1.1"
         elif mat == 2:
@@ -238,15 +243,11 @@ def getMaterial(hu, mat):
             return "2 1.05"
         else:
             return "2 1.05"
-    elif 160 <= hu:
+    elif 300 <= hu:
         return "4 1.99"
-    # elif 160 <= hu < 2500:
-    #     return "4 1.990"
-    # elif 2500 <= hu:
-    #     return "15 4.54"
 
 
-def writeVoxel(img, img_np, img_sim, path, vox_filename, vox_air_filename):
+def writeVoxel(img, img_np, img_seg, path, path_out, vox_filename, vox_air_filename):
     print("Creating Voxel file")
     voxel_path = path + "/" + vox_filename
     voxel_air_path = path + "/" + vox_air_filename
@@ -278,20 +279,29 @@ def writeVoxel(img, img_np, img_sim, path, vox_filename, vox_air_filename):
     air_header += "[END OF VXH SECTION]" + "\n"
 
     img_np = np.transpose(img_np, (1, 2, 0))
-    img_sim_np = np.transpose(sitk.GetArrayFromImage(img_sim), (1, 2, 0))
+
+    img_seg_np = np.transpose(sitk.GetArrayFromImage(img_seg), (1, 2, 0))
     func_segToMat = np.vectorize(segToMatFileNo)
     func_getMat = np.vectorize(getMaterial)
-    vox = func_getMat(img_np, func_segToMat(img_sim_np))
+    print(img_np.shape)
+    with tqdm(total=img_np.shape[0]*img_np.shape[1]*img_np.shape[2]) as bar:
+        vox = func_getMat(img_np, func_segToMat(img_seg_np, bar))
+        # Only for calibration with CatPhan 604, vox_phantom.npy is Voxel representation of CatPhan 604, notice:
+        # different Material Files have to be set, if working with the Cat Phan; see: writeInputFile()
+        # vox = np.load("vox_phantom.npy")
+        # vox = np.swapaxes(vox,0,1)
+    print(vox.shape)
 
-    # vox = vox.reshape((vox.shape[2], -1))
-    # with open(voxel_path, 'w') as outfile:
-    #     outfile.write(header)
-    #     np.savetxt(outfile, vox, delimiter='\n', newline='\n\n', fmt="%s")
-    #     outfile.close()
+    vox_seg = vox.astype("<U2").astype(float)
+    vox_seg = np.transpose(vox_seg, (2, 0, 1))
+    vox_seg = sitk.GetImageFromArray(vox_seg)
+    vox_seg.CopyInformation(img)
+    sitk.WriteImage(vox_seg, path_out + "/VoxSeg.mha")
+
     with open(voxel_path, 'w') as outfile:
         outfile.write(header)
-        for i in range(vox.shape[2]):
-            np.savetxt(outfile, vox[:, :, i], delimiter='\n', newline='\n\n', fmt="%s")
+        for i in tqdm(range(vox.shape[2])):
+            np.savetxt(outfile, vox[:, :, i], delimiter='\n', newline='\n\n', fmt="%s10")
             outfile.write('\n')
         outfile.close()
 
@@ -302,6 +312,7 @@ def writeVoxel(img, img_np, img_sim, path, vox_filename, vox_air_filename):
 
 
 def printMeta(img):
+    # only for debugging purposes
     for k in img.GetMetaDataKeys():
         v = img.GetMetaData(k)
         print(f'({k}) = = "{v}"')
@@ -311,15 +322,18 @@ def printMeta(img):
     print("Size = ", img.GetSize())
 
 
-def npToNifti(path, out_filename, np_filename, np_air_filename, spacing):
+def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, spacing):
+    # transforms numpy files of the simulation to standard CBCT data format, normalizes Data according to X-Ray
+    # absorption law
     print("Converting Projetion data to nifti file format")
-    with open(path + "/" + np_filename, 'rb') as f:
+    with open(process_path + "/" + np_filename, 'rb') as f:
         proj = np.load(f)
-    with open(path + "/" + np_air_filename, 'rb') as f:
+    with open(process_path + "/" + np_air_filename, 'rb') as f:
         air = np.load(f)
-    # set half of minimal detection to every zero detetction pixel in order to avoid 0 division
+    # set half of minimal detection amplitude to every zero energy detection in order to avoid 0 division
     proj = np.where(proj == 0, 0.5 * np.min(proj[np.nonzero(proj)]), proj)
     proj = np.log(air / proj)  # normalize according to x-ray absorption law
+
     proj_im = sitk.GetImageFromArray(proj)
     proj_im.SetSpacing((spacing, spacing, 1))
     proj_im.SetOrigin((int(-proj_im.GetSize()[0] * proj_im.GetSpacing()[0] / 2),
@@ -328,26 +342,32 @@ def npToNifti(path, out_filename, np_filename, np_air_filename, spacing):
 
 
 def readDoseImage(filepath, det_pixel_y, det_pixel_x):
-    # huge time waste next line, maybe mulitprocessing
-    nonsc = np.loadtxt(filepath, dtype="float", usecols=0)
-    nonsc = np.reshape(nonsc, (int(nonsc.size / det_pixel_y), -1))
-    nonsc = nonsc[:, 0:det_pixel_x]
-    nonsc = np.flip(nonsc, 0)
-    return nonsc
+    # reads data, adds up nonscattered and scattered photon energy counts and cuts detector image for artificial half
+    # fan scan
+
+    detenergy = np.loadtxt(filepath, dtype="float")
+    detenergy = detenergy[:, 0] + detenergy[:, 1] + detenergy[:, 2] + detenergy[:, 3]
+    detenergy = np.reshape(detenergy, (int(detenergy.size / det_pixel_y), -1))
+    detenergy = detenergy[:, 0:det_pixel_x]
+    detenergy = np.flip(detenergy, 0)
+    return detenergy
 
 
 def createNumpy(path, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename,
                 no_sim, det_pixel_x_halffan, det_pixel_x):
+    # reads MCGPU output and returns all projections in one Numpy file
     print("Read projection data")
+    items = []
     proj = []
     for i in range(no_sim):
         dat = "000" + str(i)
-        print(str(dat[-4:]))
         dat = "_" + str(dat[-4:])
         if no_sim == 1:
             dat = ""
-        proj.append(
-            readDoseImage(sim_path + "/" + sim_filename + dat, det_pixel_x_halffan, det_pixel_x))
+        items.append((sim_path + "/" + sim_filename + dat, det_pixel_x_halffan, det_pixel_x))
+    with multiprocessing.Pool() as pool:
+        for results in pool.starmap(readDoseImage, tqdm(items)):
+            proj.append(results)
     proj = np.array(proj)
     air = readDoseImage(sim_path + "/" + sim_air_filename, det_pixel_x_halffan, det_pixel_x)
     with open(path + "/" + np_filename, 'wb') as f:
@@ -357,6 +377,7 @@ def createNumpy(path, np_filename, np_air_filename, sim_path, sim_filename, sim_
 
 
 def writeXML(path, geo_filename, src_to_iso, src_to_det, no, lat_displacement):
+    # write Geometry file for image reconstruction according scan parameters the user defined
     start = 270
     step = 360 / no
     f = open(path + "/" + geo_filename, "w")
@@ -386,10 +407,11 @@ def writeXML(path, geo_filename, src_to_iso, src_to_det, no, lat_displacement):
     f.close()
 
 
-def writeInputFile(path, filename, path_mc_gpu, sim_path, sim_filename, sim_air_filename, vox_filename,
-                   vox_air_filename, in_filename, in_air_filename, ct_size, ct_spacing, spec_filepath, photons,
+def writeInputFile(path, filename, sim_filename, sim_air_filename, vox_filename,
+                   vox_air_filename, in_filename, in_air_filename, ct_size, ct_spacing, photons,
                    src_to_iso, src_to_det, no, lat_displacement, det_pix_x, det_pix_y, det_pixel_size,
                    det_pix_x_halffan, air=False):
+    # writes input file according to the MC-GPU standard, commented material files are used for Catphan 604 calibration
     print("Writing input file")
     size_x = ct_size[0] * ct_spacing[0]
     size_y = ct_size[1] * ct_spacing[1]
@@ -400,22 +422,21 @@ def writeInputFile(path, filename, path_mc_gpu, sim_path, sim_filename, sim_air_
         f = open(path + "/" + in_air_filename, "w")
     text = ("# >>>> INPUT FILE FOR MC-GPU v1.3 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n"
             + "\n#[SECTION SIMULATION CONFIG v.2009-05-12]\n")
-    if not air:
-        text += str(photons) + " # TOTAL NUMBER OF HISTORIES, OR SIMULATION TIME IN SECONDS IF VALUE < 100000\n"
-    else:
-        text += str(1.0e10) + " # TOTAL NUMBER OF HISTORIES, OR SIMULATION TIME IN SECONDS IF VALUE < 100000\n"
+
+    text += str(photons) + " # TOTAL NUMBER OF HISTORIES, OR SIMULATION TIME IN SECONDS IF VALUE < 100000\n"
+
     text += ("1234567890                      # RANDOM SEED (ranecu PRNG)\n0                               "
              + "# GPU NUMBER TO USE WHEN MPI IS NOT USED, OR TO BE AVOIDED IN MPI RUNS\n128         "
              + "# GPU THREADS PER CUDA BLOCK (multiple of 32)\n150                             "
              + "# SIMULATED HISTORIES PER GPU THREAD\n"
-             + "\n#[SECTION SOURCE v.2011-07-12]\n" + spec_filepath + "     # X-RAY ENERGY SPECTRUM FILE\n"
+             + "\n#[SECTION SOURCE v.2011-07-12]\n" + "/3rd_party/mcgpu/125kVp_0.89mmTi.spc" + "     # X-RAY ENERGY SPECTRUM FILE\n"
              + str(float(size_x / 20)) + " " + str(float(size_y / 20) - src_to_iso / 10) + " " + str(
                 float(size_z / 20)) + " "
              + "           # SOURCE POSITION: X Y Z [cm]\n"
              + "0.0   1.0   0.0                # SOURCE DIRECTION COSINES: U V W\n"
              + "-15.0 -15.0                     # POLAR AND AZIMUTHAL APERTURES FOR THE FAN BEAM [degrees]"
              + " (input negative to cover the whole detector)\n"
-             + "\n#[SECTION IMAGE DETECTOR v.2009-12-02]\n" + sim_path + "/")
+             + "\n#[SECTION IMAGE DETECTOR v.2009-12-02]\n" + "/output/")
 
     if not air:
         text += sim_filename + "           # OUTPUT IMAGE FILE NAME\n"
@@ -450,71 +471,88 @@ def writeInputFile(path, filename, path_mc_gpu, sim_path, sim_filename, sim_air_
              + "NO                        # TALLY 3D VOXEL DOSE? [YES/NO] (dose measured separately for each voxel)\n")
 
     if not air:
-        text += path + "/" + filename + "_dose.dat             # OUTPUT VOXEL DOSE FILE NAME"
+        text += "/output" + "/" + filename + "_dose.dat             # OUTPUT VOXEL DOSE FILE NAME"
     else:
-        text += path + "/" + filename + "air_dose.dat             # OUTPUT VOXEL DOSE FILE NAME"
+        text += "/output" + "/" + filename + "air_dose.dat          # OUTPUT VOXEL DOSE FILE NAME"
 
     text += ("\n 1 " + str(1) + "           #Dose ROI X\n 1 " + str(1)
              + "       #Dose ROI Y\n 1 " + str(1) + "         #Dose ROI Z\n")
 
     if not air:
-        text += "\n#[SECTION VOXELIZED GEOMETRY FILE v.2009-11-30]\n" + vox_filename
+        text += "\n#[SECTION VOXELIZED GEOMETRY FILE v.2009-11-30]\n" + "/input/" + vox_filename
     else:
-        text += "\n#[SECTION VOXELIZED GEOMETRY FILE v.2009-11-30]\n" + vox_air_filename
+        text += "\n#[SECTION VOXELIZED GEOMETRY FILE v.2009-11-30]\n" + "/input/" + vox_air_filename
 
-    text += ("\n\n#[SECTION MATERIAL FILE LIST v.2009-11-30]\n" + path_mc_gpu
-             + "/MC-GPU_material_files/air__5-120keV.mcgpu.gz               #  1st MATERIAL FILE (.gz accepted)\n")
+    text += ("\n\n#[SECTION MATERIAL FILE LIST v.2009-11-30]\n"
+             + "/3rd_party/mcgpu/MC-GPU_material_files/air_new_5-125keV.mcgpu      #  1st MATERIAL FILE (.gz accepted)\n")
 
     if not air:
-        text += (path_mc_gpu + "/MC-GPU_material_files/muscle_ICRP110__5-120keV.mcgpu.gz       #  2nd MATERIAL FILE\n"
-                 + path_mc_gpu
-                 + "/MC-GPU_material_files/soft_tissue_ICRP110__5-120keV.mcgpu.gz          "
-                 + "# 3rd MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/bone_ICRP110__5-120keV.mcgpu.gz                 "
-                 + "#  4th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/cartilage_ICRP110__5-120keV.mcgpu.gz            "
-                 + "#  5th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/adipose_ICRP110__5-120keV.mcgpu.gz              "
-                 + "#  6th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/blood_ICRP110__5-120keV.mcgpu.gz                "
-                 + "#  7th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/skin_ICRP110__5-120keV.mcgpu.gz                 "
-                 + "#  8th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/lung_ICRP110__5-120keV.mcgpu.gz                 "
-                 + "#  9th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/glands_others_ICRP110__5-120keV.mcgpu.gz        "
-                 + "# 10th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/brain_ICRP110__5-120keV.mcgpu.gz                "
-                 + "# 11th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/red_marrow_Woodard__5-120keV.mcgpu.gz           "
-                 + "# 12th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/liver_ICRP110__5-120keV.mcgpu.gz                "
-                 + "# 13th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/stomach_intestines_ICRP110__5-120keV.mcgpu.gz   "
-                 + "#  14th MATERIAL FILE\n" + path_mc_gpu
-                 + "/MC-GPU_material_files/titanium__5-120keV.mcgpu.gz                     "
+        text += ("/3rd_party/mcgpu/MC-GPU_material_files/muscle_tissue_new__5-125keV.mcgpu"
+                 + "# 2nd MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/soft_tissue_new__5-125keV.mcgpu        "
+                 + "# 3rd MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/bone_new__5-125keV.mcgpu                 "
+                 + "#  4th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/cartilage_new__5-125keV.mcgpu            "
+                 + "#  5th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/adipose_new__5-125keV.mcgpu              "
+                 + "#  6th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/blood_new__5-125keV.mcgpu                "
+                 + "#  7th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/H2O_new__5-125keV.mcgpu                 "
+                 + "#  8th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/lung_new__5-125keV.mcgpu                 "
+                 + "#  9th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/glands_others_new__5-125keV.mcgpu        "
+                 + "# 10th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/H2O_new__5-125keV.mcgpu                "
+                 + "# 11th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/red_marrow_new__5-125keV.mcgpu           "
+                 + "# 12th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/liver_new__5-125keV.mcgpu               "
+                 + "# 13th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/stomach_intestines_new__5-125keV.mcgpu   "
+                 + "#  14th MATERIAL FILE\n"
+                 + "/3rd_party/mcgpu/MC-GPU_material_files/H2O_new__5-125keV.mcgpu                     "
                  + "#  15th MATERIAL FILE\n\n\n ")
+        # # material files created for calibration with CatPhan 604
+
+        # text += (" /3rd_party/mcgpu/MC-GPU_material_files/PMP_new_5-125keV.mcgpu    #  2nd MATERIAL FILE\n"
+        #           
+        #          + " /3rd_party/mcgpu/MC-GPU_material_files/LDPE_new_5-125keV.mcgpu         "
+        #          + "# 3rd MATERIAL FILE\n"  
+        #          + " /3rd_party/mcgpu/MC-GPU_material_files/Polystrene_new_5-125keV.mcgpu                 "
+        #          + "#  4th MATERIAL FILE\n"  
+        #          + " /3rd_party/mcgpu/MC-GPU_material_files/Acryl_new_5-125keV.mcgpu           "
+        #          + "#  5th MATERIAL FILE\n"  
+        #          + " /3rd_party/mcgpu/MC-GPU_material_files/bone_20%_new_5-125keV.mcgpu              "
+        #          + "#  6th MATERIAL FILE\n"  
+        #          + " /3rd_party/mcgpu/MC-GPU_material_files/Delrin_new_5-125keV.mcgpu                "
+        #          + "#  7th MATERIAL FILE\n"  
+        #          + " /3rd_party/mcgpu/MC-GPU_material_files/Bone_50%_new_5-125keV.mcgpu                "
+        #          + "#  8th MATERIAL FILE\n"  
+        #          + " /3rd_party/mcgpu/MC-GPU_material_files/Teflon_new_5-125keV.mcgpu                 "
+        #          + "#  9th MATERIAL FILE\n"  
+        #          + " /3rd_party/mcgpu/MC-GPU_material_files/H2O_new_5-125keV.mcgpu                 "
+        #          + "#  10th MATERIAL FILE\n\n\n ")
 
     text += "# >>>> END INPUT FILE >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n"
     f.write(text)
     f.close()
 
 
-def runSimulation(path, path_mc_gpu, in_filename):
-    directory = os.getcwd()
+def runSimulation(path, gpu_id: int = 0):
     os.chdir(path)
-    os.system(path_mc_gpu + "/MC-GPU_v1.3.x " + in_filename + " | tee MC-GPU_v1.3_2" + in_filename + ".out")
-    os.chdir(directory)
-
+    os.system(f"docker run --rm --gpus device={gpu_id} -v $(pwd)/input:/input -v $(pwd)/output:/output -u $(id -u):$(id -g) "
+              "imaging MC-GPU_v1.3.x /input/input.in")
+    os.system(f"docker run --rm --gpus device={gpu_id} -v $(pwd)/input:/input -v $(pwd)/output:/output -u $(id -u):$(id -g) "
+              "imaging MC-GPU_v1.3.x /input/input_air.in")
 
 @click.command()
 @click.option('--path_ct_in', help='Path to ct file')
 @click.option('--filename_ct_in', help='CT filename')
 @click.option('--path_out', help='Desired Output folder')
 @click.option('--filename', help='Desired Output file name')
-@click.option('--path_mc_gpu', help='Path to MC GPU folder (e.g./home/user/Documents/MC-GPU_v1.3_RELEASE_2012-12-12)')
-@click.option('--spec_filepath', default="/home/crohling/Documents/MC-GPU_v1.3_RELEASE_2012-12-12/120kVp_4.3mmAl.spc",
-              help='X-Ray Spectrum File in PENELOPE 2006 Format')
 @click.option('--no_sim', default=894, help='Number of Projections.')
 @click.option('--det_pix_size', default=0.776, help='Size of one Detector pixel in mm')
 @click.option('--det_pix_x', default=512, help='Number of Detector-pixel in X-Direction')
@@ -522,12 +560,12 @@ def runSimulation(path, path_mc_gpu, in_filename):
 @click.option('--lat_displacement', default=-160, help='If cbct is used in half fan mode, give lateral displacement')
 @click.option('--src_to_detector', default=1500, help='Distance between X-Ray source and detector in mm')
 @click.option('--src_to_iso', default=1000, help='Distance between X-Ray source and rotation center in mm')
-@click.option('--photons', default=1.0e7, help='Number of photons to Simulate for each projection')
+@click.option('--photons', default=2.4e9, help='Number of photons to Simulate for each projection')
 @click.option('--force_rerun', default=False, help='Set force_rerun=True to redo everything')
 @click.option('--force_segment', default=False, help='Set force_segment=True to redo segmentation')
 @click.option('--force_create_object', default=False, help='Set force_create_object=True to redo the object')
 @click.option('--force_simulate', default=False, help='Set force_simulate=True to redo simulation')
-def main(path_ct_in, filename_ct_in, path_out, filename, path_mc_gpu, spec_filepath, no_sim, det_pix_size,
+def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
          det_pix_x, det_pix_y, lat_displacement, src_to_detector, src_to_iso, photons, force_rerun, force_segment,
          force_create_object, force_simulate):
     # #### Setup #############################################
@@ -535,26 +573,35 @@ def main(path_ct_in, filename_ct_in, path_out, filename, path_mc_gpu, spec_filep
     if not os.path.exists(path_out):
         os.makedirs(path_out)
 
+    input_path = path_out + "/input"
+    output_path = path_out + "/output"
+    process_path = path_out + "/process"
+    if not os.path.exists(input_path):
+        os.makedirs(input_path)
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+    if not os.path.exists(process_path):
+        os.makedirs(process_path)
+
+
     seg_path = path_out + "/segmentation"
     seg_filename = "total_seg.nii"
     if not os.path.exists(seg_path):
         os.makedirs(seg_path)
 
-    sim_path = path_out + "/Sim_data"
+    sim_path = output_path
     sim_filename = filename + "_image.dat"
     sim_air_filename = filename + "_air_image.dat"
-    vox_filename = filename + ".vox"
-    vox_air_filename = filename + "_air.vox"
+    vox_filename = "geometry" + ".vox"
+    vox_air_filename = "geometry" + "_air.vox"
     geo_filename = filename + ".xml"
     np_filename = filename + "_np.npy"
     np_air_filename = filename + "_air_np.npy"
-    in_filename = "MC-GPU_v1.3.in"
-    in_air_filename = "MC-GPU_v1.3_air.in"
+    in_filename = "input.in"
+    in_air_filename = "input_air.in"
     out_filename = "sim_" + filename + ".mha"
     log_filename = "log.pkl"
 
-    if not os.path.exists(sim_path):
-        os.makedirs(sim_path)
 
     # create sitk Images
     img_ct = sitk.ReadImage(path_ct_in + "/" + filename_ct_in)
@@ -570,37 +617,38 @@ def main(path_ct_in, filename_ct_in, path_out, filename, path_mc_gpu, spec_filep
     img_seg = sitk.ReadImage(seg_path + "/" + seg_filename)
 
     # Create Voxel Object
-    if not os.path.exists(path_out + "/" + vox_filename) or force_create_object or force_rerun:
-        writeVoxel(img_ct, img_np, img_seg, path_out, vox_filename, vox_air_filename)
+    if not os.path.exists(input_path + "/" + vox_filename) or force_create_object or force_rerun:
+        writeVoxel(img_ct, img_np, img_seg, input_path, path_out, vox_filename, vox_air_filename)
 
     # Prepare and Run MC-GPU Simulation
-    if not os.path.exists(path_out + "/" + log_filename) or force_simulate or force_rerun:
-        writeInputFile(path_out, filename, path_mc_gpu, sim_path, sim_filename, sim_air_filename, vox_filename,
-                       vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(),
-                       spec_filepath, photons, src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
+    if not os.path.exists(process_path + "/" + log_filename) or force_simulate or force_rerun:
+        writeInputFile(input_path, filename, sim_filename, sim_air_filename, vox_filename,
+                       vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(), photons,
+                       src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
                        det_pix_y, det_pix_size, det_pix_x_halffan)
-        writeInputFile(path_out, filename, path_mc_gpu, sim_path, sim_filename, sim_air_filename, vox_filename,
-                       vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(),
-                       spec_filepath, photons, src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
+        writeInputFile(input_path, filename, sim_filename, sim_air_filename, vox_filename,
+                       vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(), photons,
+                       src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
                        det_pix_y, det_pix_size, det_pix_x_halffan, air=True)
-        runSimulation(path_out, path_mc_gpu, in_filename)
-        runSimulation(path_out, path_mc_gpu, in_air_filename)
+        runSimulation(path_out)
         # create log file
-        with open(path_out + "/" + log_filename, 'wb') as f:
+        with open(process_path + "/" + log_filename, 'wb') as f:
             pickle.dump([no_sim, det_pix_size, det_pix_x, det_pix_y, lat_displacement,
                          src_to_detector, src_to_iso, photons], f)
 
     # read log file
-    with open(path_out + "/" + log_filename, "rb") as f:
+    with open(process_path + "/" + log_filename, "rb") as f:
         no_sim, det_pix_size, det_pix_x, det_pix_y, lat_displacement, src_to_detector, \
          src_to_iso, photons = pickle.load(f)
+
     # bring simulation to SimpleITK format and write Geometry file
-    createNumpy(path_out, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename, no_sim,
+    createNumpy(process_path, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename, no_sim,
                 det_pix_x_halffan, det_pix_x)
-    npToNifti(path_out, out_filename, np_filename, np_air_filename, det_pix_size)
+    npToNifti(path_out, process_path, out_filename, np_filename, np_air_filename, det_pix_size)
     writeXML(path_out, geo_filename, src_to_iso, src_to_detector, no_sim, lat_displacement)
     #############################################################
 
 
 if __name__ == '__main__':
-    main()
+    run()
+

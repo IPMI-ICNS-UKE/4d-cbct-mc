@@ -1,0 +1,8 @@
+simpleitk~=2.2.0
+numpy~=1.23.3
+click~=8.0.4
+tqdm~=4.64.1
+matplotlib~=3.5.3
+scipy~=1.9.3
+tables~=3.7.0
+TotalSegmentator==1.1
