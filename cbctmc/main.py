@@ -363,7 +363,7 @@ def readDoseImage(filepath, det_pixel_y, det_pixel_x, combine_photons: bool = Tr
         detenergy = detenergy[:, 0:det_pixel_x]
     else:
         detenergy = np.reshape(detenergy, (int(detenergy.size / det_pixel_y), -1, 4))
-        detenergy = detenergy[:,0:det_pixel_x, 4]
+        detenergy = detenergy[:,0:det_pixel_x, :]
     detenergy = np.flip(detenergy, 0)
     return detenergy
 
@@ -607,7 +607,7 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
         os.makedirs(process_path)
 
 
-    seg_path = path_ct_in
+    seg_path = path_ct_in + "segmentation_" + filename_ct_in[:-4]
     seg_filename = filename_ct_in[:-4] + "_seg.nii"
     sim_path = output_path
     sim_filename = filename + "_image.dat"
