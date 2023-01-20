@@ -339,17 +339,17 @@ def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, sp
 
     if not combine_photons:
         for i in range(4):
-            proj_im = sitk.GetImageFromArray(proj[:,:,:,i])
+            proj_im = sitk.GetImageFromArray(proj[i, :, :, :])
             proj_im.SetSpacing((spacing, spacing, 1))
             proj_im.SetOrigin((int(-proj_im.GetSize()[0] * proj_im.GetSpacing()[0] / 2),
                                int(-proj_im.GetSize()[1] * proj_im.GetSpacing()[1] / 2), 1))
             sitk.WriteImage(proj_im, path + "/" + str(i) + "._" + out_filename)
-
-    proj_im = sitk.GetImageFromArray(proj)
-    proj_im.SetSpacing((spacing, spacing, 1))
-    proj_im.SetOrigin((int(-proj_im.GetSize()[0] * proj_im.GetSpacing()[0] / 2),
-                       int(-proj_im.GetSize()[1] * proj_im.GetSpacing()[1] / 2), 1))
-    sitk.WriteImage(proj_im, path + "/" + out_filename)
+    else:
+        proj_im = sitk.GetImageFromArray(proj)
+        proj_im.SetSpacing((spacing, spacing, 1))
+        proj_im.SetOrigin((int(-proj_im.GetSize()[0] * proj_im.GetSpacing()[0] / 2),
+                           int(-proj_im.GetSize()[1] * proj_im.GetSpacing()[1] / 2), 1))
+        sitk.WriteImage(proj_im, path + "/" + out_filename)
 
 
 def readDoseImage(filepath, det_pixel_y, det_pixel_x, combine_photons: bool = True):
@@ -362,9 +362,9 @@ def readDoseImage(filepath, det_pixel_y, det_pixel_x, combine_photons: bool = Tr
         detenergy = np.reshape(detenergy, (int(detenergy.size / det_pixel_y), -1))
         detenergy = detenergy[:, 0:det_pixel_x]
     else:
-        detenergy = np.reshape(detenergy, (int(detenergy.size / det_pixel_y), -1, 4))
-        detenergy = detenergy[:,0:det_pixel_x, :]
-    detenergy = np.flip(detenergy, 0)
+        detenergy = np.reshape(4, detenergy, (int(detenergy.size / det_pixel_y), -1))
+        detenergy = detenergy[:, :, 0:det_pixel_x]
+    detenergy = np.flip(detenergy, 1)
     return detenergy
 
 
@@ -605,10 +605,11 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
         os.makedirs(output_path)
     if not os.path.exists(process_path):
         os.makedirs(process_path)
-
-
-    seg_path = path_ct_in + "segmentation_" + filename_ct_in[:-4]
+    seg_path = path_ct_in + "/segmentation_" + filename_ct_in[:-4]
     seg_filename = filename_ct_in[:-4] + "_seg.nii"
+    if not os.path.exists(seg_path):
+        os.makedirs(seg_path)
+
     sim_path = output_path
     sim_filename = filename + "_image.dat"
     sim_air_filename = filename + "_air_image.dat"
