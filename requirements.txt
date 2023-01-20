@@ -1,5 +1,6 @@
 simpleitk~=2.2.0
 numpy~=1.23.3
+torch~=1.13.1
 click~=8.0.4
 tqdm~=4.64.1
 matplotlib~=3.5.3
