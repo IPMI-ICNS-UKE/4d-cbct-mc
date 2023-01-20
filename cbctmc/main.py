@@ -362,7 +362,7 @@ def readDoseImage(filepath, det_pixel_y, det_pixel_x, combine_photons: bool = Tr
         detenergy = np.reshape(detenergy, (int(detenergy.size / det_pixel_y), -1))
         detenergy = detenergy[:, 0:det_pixel_x]
     else:
-        detenergy = np.reshape(4, detenergy, (int(detenergy.size / det_pixel_y), -1))
+        detenergy = np.reshape(detenergy, (4, int(detenergy.size / det_pixel_y), -1))
         detenergy = detenergy[:, :, 0:det_pixel_x]
     detenergy = np.flip(detenergy, 1)
     return detenergy
