@@ -385,7 +385,6 @@ def createNumpy(path, np_filename, np_air_filename, sim_path, sim_filename, sim_
         for results in pool.starmap(readDoseImage, tqdm(items)):
             proj.append(results)
     proj = np.array(proj)
-    print(proj.shape)
     air = readDoseImage(sim_path + "/" + sim_air_filename, det_pixel_x_halffan, det_pixel_x)
     with open(path + "/" + np_filename, 'wb') as f:
         np.save(f, proj)
