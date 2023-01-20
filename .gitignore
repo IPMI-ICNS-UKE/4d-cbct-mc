@@ -278,3 +278,5 @@ poetry.toml
 .idea/
 
 *.npy
+
+sandbox.py

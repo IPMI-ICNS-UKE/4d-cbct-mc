@@ -322,7 +322,7 @@ def printMeta(img):
     print("Size = ", img.GetSize())
 
 
-def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, spacing):
+def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, spacing, normalize : bool = True):
     # transforms numpy files of the simulation to standard CBCT data format, normalizes Data according to X-Ray
     # absorption law
     print("Converting Projetion data to nifti file format")
@@ -331,8 +331,9 @@ def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, sp
     with open(process_path + "/" + np_air_filename, 'rb') as f:
         air = np.load(f)
     # set half of minimal detection amplitude to every zero energy detection in order to avoid 0 division
-    proj = np.where(proj == 0, 0.5 * np.min(proj[np.nonzero(proj)]), proj)
-    proj = np.log(air / proj)  # normalize according to x-ray absorption law
+    if normalize:
+        proj = np.where(proj == 0, 0.5 * np.min(proj[np.nonzero(proj)]), proj)
+        proj = np.log(air / proj)  # normalize according to x-ray absorption law
 
     proj_im = sitk.GetImageFromArray(proj)
     proj_im.SetSpacing((spacing, spacing, 1))
@@ -567,9 +568,11 @@ def runSimulation(path, gpu_id: int = 0):
 @click.option('--force_simulate', default=False, help='Set force_simulate=True to redo simulation')
 @click.option('--gpu_id', default=0, type=click.INT, help='PCI ID of GPU for MC simulation')
 @click.option('--random_seed', default=42, type=click.INT, help='Random seed for MC simulation')
+@click.option('--normalize', default=True, type=click.BOOL, help='Set normalize = False to get Raw, unnormalized '
+                                                                 'Simulation data')
 def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
          det_pix_x, det_pix_y, lat_displacement, src_to_detector, src_to_iso, photons, force_rerun, force_segment,
-         force_create_object, force_simulate, gpu_id, random_seed):
+         force_create_object, force_simulate, gpu_id, random_seed, normalize):
     # #### Setup #############################################
     # create Files, define paths
     if not os.path.exists(path_out):
@@ -586,11 +589,8 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
         os.makedirs(process_path)
 
 
-    seg_path = path_out + "/segmentation"
-    seg_filename = "total_seg.nii"
-    if not os.path.exists(seg_path):
-        os.makedirs(seg_path)
-
+    seg_path = path_ct_in
+    seg_filename = filename_ct_in[:-4] + "_seg.nii"
     sim_path = output_path
     sim_filename = filename + "_image.dat"
     sim_air_filename = filename + "_air_image.dat"
@@ -646,7 +646,7 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
     # bring simulation to SimpleITK format and write Geometry file
     createNumpy(process_path, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename, no_sim,
                 det_pix_x_halffan, det_pix_x)
-    npToNifti(path_out, process_path, out_filename, np_filename, np_air_filename, det_pix_size)
+    npToNifti(path_out, process_path, out_filename, np_filename, np_air_filename, det_pix_size, normalize=normalize)
     writeXML(path_out, geo_filename, src_to_iso, src_to_detector, no_sim, lat_displacement)
     #############################################################
 
