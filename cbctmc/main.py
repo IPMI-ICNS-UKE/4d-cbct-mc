@@ -362,8 +362,8 @@ def readDoseImage(filepath, det_pixel_y, det_pixel_x, combine_photons: bool = Tr
         detenergy = np.reshape(detenergy, (int(detenergy.size / det_pixel_y), -1))
         detenergy = detenergy[:, 0:det_pixel_x]
     else:
-        for i in range(4):
-            detenergy[:,i] = np.reshape(detenergy[:,i], (int(detenergy.size / det_pixel_y), -1))
+
+        detenergy = np.reshape(detenergy, (int(detenergy[:,0].size / det_pixel_y), -1, 4))
         detenergy = detenergy[:, 0:det_pixel_x, :]
     detenergy = np.flip(detenergy, 0)
     return detenergy
@@ -385,6 +385,7 @@ def createNumpy(path, np_filename, np_air_filename, sim_path, sim_filename, sim_
         for results in pool.starmap(readDoseImage, tqdm(items)):
             proj.append(results)
     proj = np.array(proj)
+    print(proj.shape)
     air = readDoseImage(sim_path + "/" + sim_air_filename, det_pixel_x_halffan, det_pixel_x)
     with open(path + "/" + np_filename, 'wb') as f:
         np.save(f, proj)
