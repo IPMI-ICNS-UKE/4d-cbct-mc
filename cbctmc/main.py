@@ -339,7 +339,7 @@ def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, sp
 
     if not combine_photons:
         for i in range(4):
-            proj_im = sitk.GetImageFromArray(proj[i, :, :, :])
+            proj_im = sitk.GetImageFromArray(proj[:, :, :, i])
             proj_im.SetSpacing((spacing, spacing, 1))
             proj_im.SetOrigin((int(-proj_im.GetSize()[0] * proj_im.GetSpacing()[0] / 2),
                                int(-proj_im.GetSize()[1] * proj_im.GetSpacing()[1] / 2), 1))
@@ -362,9 +362,10 @@ def readDoseImage(filepath, det_pixel_y, det_pixel_x, combine_photons: bool = Tr
         detenergy = np.reshape(detenergy, (int(detenergy.size / det_pixel_y), -1))
         detenergy = detenergy[:, 0:det_pixel_x]
     else:
-        detenergy = np.reshape(detenergy, (4, int(detenergy.size / det_pixel_y), -1))
-        detenergy = detenergy[:, :, 0:det_pixel_x]
-    detenergy = np.flip(detenergy, 1)
+        for i in range(4):
+            detenergy[:,i] = np.reshape(detenergy[:,i], (int(detenergy.size / det_pixel_y), -1))
+        detenergy = detenergy[:, 0:det_pixel_x, :]
+    detenergy = np.flip(detenergy, 0)
     return detenergy
 
 
