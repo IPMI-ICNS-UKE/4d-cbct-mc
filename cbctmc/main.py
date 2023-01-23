@@ -300,7 +300,7 @@ def writeVoxel(img, img_np, img_seg, path, path_out, vox_filename, vox_air_filen
     vox_seg = np.transpose(vox_seg, (2, 0, 1))
     vox_seg = sitk.GetImageFromArray(vox_seg)
     vox_seg.CopyInformation(img)
-    sitk.WriteImage(vox_seg, path_out + "/VoxSeg.mha")
+    sitk.WriteImage(vox_seg, path + "/VoxSeg.mha")
 
     with open(voxel_path, 'w') as outfile:
         outfile.write(header)
