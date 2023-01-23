@@ -134,11 +134,14 @@ def groupSegmentation(path):
         filename = os.fsdecode(file)
         img_ni = sitk.ReadImage(path + "/" + filename)
         img_np = sitk.GetArrayFromImage(img_ni)
-        # img_np = np.flip(img_np, 2)
         arr = arr + img_np * segMapToBinary(filename.replace(".nii.gz", ""))
-        os.remove(path + "/" + filename)
+        # os.remove(path + "/" + filename)
     total_seg = sitk.GetImageFromArray(arr)
-    total_seg.CopyInformation(info_image)
+    # total_seg.CopyInformation(info_image)
+    total_seg.SetSpacing(info_image.GetSpacing())
+    total_seg.SetOrigin(info_image.GetOrigin())
+    total_seg.SetDirection(info_image.GetDirection())
+
     return total_seg
 
 
