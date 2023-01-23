@@ -386,8 +386,8 @@ def createNumpy(path, path_out, np_filename, np_air_filename, sim_path, sim_file
             np.save(f, air)
     else:
         for i in range(no_sim):
-            with open(path_out + "/" + filename + str(i), 'wb') as f:
-                np.save(f, proj[..., i])
+            with open(path_out + "/" + filename + "_proj:" + str(i), 'wb') as f:
+                np.save(f, proj[i, ...])
 
 
 def writeXML(path, geo_filename, src_to_iso, src_to_det, no, lat_displacement):
