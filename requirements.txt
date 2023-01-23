@@ -1,4 +1,4 @@
-simpleitk~=2.2.0
+simpleitk==2.0.2
 numpy~=1.23.3
 torch~=1.13.1
 click~=8.0.4
@@ -6,4 +6,4 @@ tqdm~=4.64.1
 matplotlib~=3.5.3
 scipy~=1.9.3
 tables~=3.7.0
-TotalSegmentator==1.1
+TotalSegmentator==1.3
