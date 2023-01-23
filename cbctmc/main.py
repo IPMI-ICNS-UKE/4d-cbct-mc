@@ -614,6 +614,9 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
     seg_filename = filename_ct_in[:-4] + "_seg.nii"
     if not os.path.exists(seg_path):
         os.makedirs(seg_path)
+    vox_path = path_ct_in + "/voxel_" + filename_ct_in[:-4]
+    if not os.path.exists(vox_path):
+        os.makedirs(vox_path)
 
     sim_path = output_path
     sim_filename = filename + "_image.dat"
@@ -643,8 +646,9 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
     img_seg = sitk.ReadImage(seg_path + "/" + seg_filename)
 
     # Create Voxel Object
-    if not os.path.exists(input_path + "/" + vox_filename) or force_create_object or force_rerun:
-        writeVoxel(img_ct, img_np, img_seg, input_path, path_out, vox_filename, vox_air_filename)
+    if not os.path.exists(vox_path + "/" + vox_filename) or force_create_object or force_rerun:
+        writeVoxel(img_ct, img_np, img_seg, vox_path, path_out, vox_filename, vox_air_filename)
+    shutil.copyfile(vox_path + "/" + vox_filename, input_path + vox_filename)
 
     # Prepare and Run MC-GPU Simulation
     if not os.path.exists(process_path + "/" + log_filename) or force_simulate or force_rerun:
@@ -657,6 +661,7 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
                        src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
                        det_pix_y, det_pix_size, det_pix_x_halffan, air=True, random_seed=random_seed)
         runSimulation(path_out, gpu_id=gpu_id)
+        os.remove(input_path + "/" + vox_filename)
         # create log file
         with open(process_path + "/" + log_filename, 'wb') as f:
             pickle.dump([no_sim, det_pix_size, det_pix_x, det_pix_y, lat_displacement,
