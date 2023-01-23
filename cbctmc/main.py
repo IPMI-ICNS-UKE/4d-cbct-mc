@@ -5,6 +5,7 @@ import click
 import pickle
 from tqdm import tqdm
 import multiprocessing
+import shutil
 
 
 def segMapToBinary(name):
@@ -386,8 +387,9 @@ def createNumpy(path, np_filename, np_air_filename, sim_path, sim_filename, sim_
             proj.append(results)
     proj = np.array(proj)
     air = readDoseImage(sim_path + "/" + sim_air_filename, det_pixel_x_halffan, det_pixel_x)
+    shutil.rmtree(sim_path)
     with open(path + "/" + np_filename, 'wb') as f:
-        np.save(f, proj)
+        np.savez_compressed(f, proj)
     with open(path + "/" + np_air_filename, 'wb') as f:
         np.save(f, air)
 
