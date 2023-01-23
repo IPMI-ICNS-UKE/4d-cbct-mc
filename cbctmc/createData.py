@@ -11,7 +11,7 @@ def run():
             for j in range(2):
                 j = j*5
                 seed = np.random.randint(10, 123455463)
-                print("run_mc --path_ct_in /home/crohling/data/ct/4d_ct_lung_uke_artifact_free/{}".format(id) +
+                os.system("run_mc --path_ct_in /home/crohling/data/ct/4d_ct_lung_uke_artifact_free/{}".format(id) +
                           "_4DCT_Lunge_amplitudebased_complete --filename_ct_in phase_0{}.nii ".format(j) +
                           "--path_out /home/crohling/data/results/low_pat:{}".format(id) + "_phase:0" + str(j) +
                           "_run:" + str(i) +
@@ -21,7 +21,7 @@ def run():
         for j in range(2):
             j = j * 5
             seed = np.random.randint(10, 123455463)
-            print("run_mc --path_ct_in /home/crohling/data/ct/4d_ct_lung_uke_artifact_free/{}".format(id) +
+            os.system("run_mc --path_ct_in /home/crohling/data/ct/4d_ct_lung_uke_artifact_free/{}".format(id) +
                       "_4DCT_Lunge_amplitudebased_complete --filename_ct_in phase_0{}.nii ".format(j) +
                       "--path_out /home/crohling/data/results/HIGH_pat:{}".format(id) + "_phase:0" + str(j) +
                       " --filename HIGH_pat:{}".format(id) + "_phase:0" + str(j) +
