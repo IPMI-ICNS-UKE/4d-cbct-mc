@@ -648,9 +648,8 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
     # Create Voxel Object
     if not os.path.exists(vox_path + "/" + vox_filename) or force_create_object or force_rerun:
         writeVoxel(img_ct, img_np, img_seg, vox_path, path_out, vox_filename, vox_air_filename)
-    dest = shutil.copyfile(vox_path + "/" + vox_filename, input_path + vox_filename)
-    dest = shutil.copyfile(vox_path + "/" + vox_air_filename, input_path + vox_air_filename)
-    print(dest)
+    shutil.copyfile(vox_path + "/" + vox_filename, input_path + "/" + vox_filename)
+    shutil.copyfile(vox_path + "/" + vox_air_filename, input_path + "/" + vox_air_filename)
 
     # Prepare and Run MC-GPU Simulation
     if not os.path.exists(process_path + "/" + log_filename) or force_simulate or force_rerun:
