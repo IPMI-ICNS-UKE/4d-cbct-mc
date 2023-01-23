@@ -619,7 +619,7 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
     vox_filename = "geometry" + ".vox"
     vox_air_filename = "geometry" + "_air.vox"
     geo_filename = filename + ".xml"
-    np_filename = filename + "_np.npy"
+    np_filename = filename + "_np.npz"
     np_air_filename = filename + "_air_np.npy"
     in_filename = "input.in"
     in_air_filename = "input_air.in"

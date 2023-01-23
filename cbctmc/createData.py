@@ -4,7 +4,7 @@ import numpy as np
 
 
 def run():
-    for i in range(120):
+    for i in range(6):
         i = i+114
         for j in range(2):
             j = j*5
