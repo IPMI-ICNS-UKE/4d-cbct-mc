@@ -135,7 +135,7 @@ def groupSegmentation(path):
         img_ni = sitk.ReadImage(path + "/" + filename)
         img_np = sitk.GetArrayFromImage(img_ni)
         arr = arr + img_np * segMapToBinary(filename.replace(".nii.gz", ""))
-        # os.remove(path + "/" + filename)
+        os.remove(path + "/" + filename)
     total_seg = sitk.GetImageFromArray(arr)
     # total_seg.CopyInformation(info_image)
     total_seg.SetSpacing(info_image.GetSpacing())
@@ -382,6 +382,9 @@ def createNumpy(path, path_out, np_filename, np_air_filename, sim_path, sim_file
     proj = np.array(proj)
     air = readDoseImage(sim_path + "/" + sim_air_filename, det_pixel_x_halffan, det_pixel_x)
     shutil.rmtree(sim_path)
+
+    proj = proj.astype(np.float32)
+    air = air.astype(np.float32)
     if not speed_up:
         with open(path + "/" + np_filename, 'wb') as f:
             np.save(f, proj)
@@ -389,7 +392,7 @@ def createNumpy(path, path_out, np_filename, np_air_filename, sim_path, sim_file
             np.save(f, air)
     else:
         for i in range(no_sim):
-            with open(path_out + "/" + filename + "_proj:" + str(i), 'wb') as f:
+            with open(path_out + "/" + filename + f"_proj_{i:02d}.npy", 'wb') as f:
                 np.save(f, proj[i, ...])
 
 
