@@ -389,7 +389,7 @@ def createNumpy(path, np_filename, np_air_filename, sim_path, sim_filename, sim_
     air = readDoseImage(sim_path + "/" + sim_air_filename, det_pixel_x_halffan, det_pixel_x)
     shutil.rmtree(sim_path)
     with open(path + "/" + np_filename, 'wb') as f:
-        np.savez_compressed(f, proj)
+        np.save(f, proj)
     with open(path + "/" + np_air_filename, 'wb') as f:
         np.save(f, air)
 
@@ -619,7 +619,7 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
     vox_filename = "geometry" + ".vox"
     vox_air_filename = "geometry" + "_air.vox"
     geo_filename = filename + ".xml"
-    np_filename = filename + "_np.npz"
+    np_filename = filename + "_np.npy"
     np_air_filename = filename + "_air_np.npy"
     in_filename = "input.in"
     in_air_filename = "input_air.in"
@@ -660,14 +660,15 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
             pickle.dump([no_sim, det_pix_size, det_pix_x, det_pix_y, lat_displacement,
                          src_to_detector, src_to_iso, photons], f)
 
+        createNumpy(process_path, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename, no_sim,
+                    det_pix_x_halffan, det_pix_x, combine_photons=combine_photons)
+
     # read log file
     with open(process_path + "/" + log_filename, "rb") as f:
         no_sim, det_pix_size, det_pix_x, det_pix_y, lat_displacement, src_to_detector, \
          src_to_iso, photons = pickle.load(f)
 
     # bring simulation to SimpleITK format and write Geometry file
-    createNumpy(process_path, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename, no_sim,
-                det_pix_x_halffan, det_pix_x, combine_photons=combine_photons)
     npToNifti(path_out, process_path, out_filename, np_filename, np_air_filename, det_pix_size, normalize=normalize,
               combine_photons=combine_photons)
     writeXML(path_out, geo_filename, src_to_iso, src_to_detector, no_sim, lat_displacement)
