@@ -327,5 +327,8 @@ def flipRecon():
 if __name__ == "__main__":
     # analyzeCat()
     # getNPhoton(para)
-    analyzePatient()
-    flipRecon()
+    # analyzePatient()
+    # flipRecon()
+    im = np.load("/home/crohling/amalthea/data/results/low_022_test3/patient_22_proj:0")
+    plt.imshow(im)
+    plt.show()
