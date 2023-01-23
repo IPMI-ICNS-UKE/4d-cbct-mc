@@ -187,12 +187,12 @@ def segToMatFileNo(i, bar):
 def getMaterial(hu, mat):
     if hu < -960:
         return "1 0.0012"
-    elif -960 <= hu < -250:
+    elif -960 <= hu < -450:
         if mat == 9:
             return "9 0.382"
         else:
             return "1 0.0012"
-    elif -250 <= hu < -20:
+    elif -450 <= hu < -20:
         if mat == 3:
             return "3 1.0"
         elif mat == 7:
