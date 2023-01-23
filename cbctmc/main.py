@@ -323,8 +323,7 @@ def printMeta(img):
     print("Size = ", img.GetSize())
 
 
-def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, spacing, normalize: bool = True,
-              combine_photons: bool=True):
+def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, spacing):
     # transforms numpy files of the simulation to standard CBCT data format, normalizes Data according to X-Ray
     # absorption law
     print("Converting Projetion data to nifti file format")
@@ -333,24 +332,16 @@ def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, sp
     with open(process_path + "/" + np_air_filename, 'rb') as f:
         air = np.load(f)
 
-    if normalize and combine_photons:
-        # set half of minimal detection amplitude to every zero energy detection in order to avoid 0 division
-        proj = np.where(proj == 0, 0.5 * np.min(proj[np.nonzero(proj)]), proj)
-        proj = np.log(air / proj)  # normalize according to x-ray absorption law
 
-    if not combine_photons:
-        for i in range(4):
-            proj_im = sitk.GetImageFromArray(proj[:, :, :, i])
-            proj_im.SetSpacing((spacing, spacing, 1))
-            proj_im.SetOrigin((int(-proj_im.GetSize()[0] * proj_im.GetSpacing()[0] / 2),
-                               int(-proj_im.GetSize()[1] * proj_im.GetSpacing()[1] / 2), 1))
-            sitk.WriteImage(proj_im, path + "/" + str(i) + "._" + out_filename)
-    else:
-        proj_im = sitk.GetImageFromArray(proj)
-        proj_im.SetSpacing((spacing, spacing, 1))
-        proj_im.SetOrigin((int(-proj_im.GetSize()[0] * proj_im.GetSpacing()[0] / 2),
-                           int(-proj_im.GetSize()[1] * proj_im.GetSpacing()[1] / 2), 1))
-        sitk.WriteImage(proj_im, path + "/" + out_filename)
+    # set half of minimal detection amplitude to every zero energy detection in order to avoid 0 division
+    proj = np.where(proj == 0, 0.5 * np.min(proj[np.nonzero(proj)]), proj)
+    proj = np.log(air / proj)  # normalize according to x-ray absorption law
+
+    proj_im = sitk.GetImageFromArray(proj)
+    proj_im.SetSpacing((spacing, spacing, 1))
+    proj_im.SetOrigin((int(-proj_im.GetSize()[0] * proj_im.GetSpacing()[0] / 2),
+                       int(-proj_im.GetSize()[1] * proj_im.GetSpacing()[1] / 2), 1))
+    sitk.WriteImage(proj_im, path + "/" + out_filename)
 
 
 def readDoseImage(filepath, det_pixel_y, det_pixel_x, combine_photons: bool = True):
@@ -370,8 +361,8 @@ def readDoseImage(filepath, det_pixel_y, det_pixel_x, combine_photons: bool = Tr
     return detenergy
 
 
-def createNumpy(path, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename,
-                no_sim, det_pixel_x_halffan, det_pixel_x, combine_photons: bool = True):
+def createNumpy(path, path_out, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename, filename,
+                no_sim, det_pixel_x_halffan, det_pixel_x, combine_photons: bool = True, speed_up: bool = False):
     # reads MCGPU output and returns all projections in one Numpy file
     print("Read projection data")
     items = []
@@ -388,10 +379,15 @@ def createNumpy(path, np_filename, np_air_filename, sim_path, sim_filename, sim_
     proj = np.array(proj)
     air = readDoseImage(sim_path + "/" + sim_air_filename, det_pixel_x_halffan, det_pixel_x)
     shutil.rmtree(sim_path)
-    with open(path + "/" + np_filename, 'wb') as f:
-        np.save(f, proj)
-    with open(path + "/" + np_air_filename, 'wb') as f:
-        np.save(f, air)
+    if not speed_up:
+        with open(path + "/" + np_filename, 'wb') as f:
+            np.save(f, proj)
+        with open(path + "/" + np_air_filename, 'wb') as f:
+            np.save(f, air)
+    else:
+        for i in range(no_sim):
+            with open(path_out + "/" + filename + str(i), 'wb') as f:
+                np.save(f, proj[..., i])
 
 
 def writeXML(path, geo_filename, src_to_iso, src_to_det, no, lat_displacement):
@@ -585,15 +581,15 @@ def runSimulation(path, gpu_id: int = 0):
 @click.option('--force_simulate', default=False, help='Set force_simulate=True to redo simulation')
 @click.option('--gpu_id', default=0, type=click.INT, help='PCI ID of GPU for MC simulation')
 @click.option('--random_seed', default=42, type=click.INT, help='Random seed for MC simulation')
-@click.option('--normalize', default=True, type=click.BOOL, help='Set normalize = False to get Raw, unnormalized '
-                                                                 'Simulation data')
+@click.option('--speed_up', default=False, type=click.BOOL, help='Set speed_up TRUE to get Raw, unnormalized '
+                                                                 'Simulation data as npy for each Proj')
 @click.option('--combine_photons', default=True, type=click.BOOL, help='Set combine_photons = False to get 4 outputs,'
                                                                        'containing non -, compton - , rayleigh and '
                                                                        'multiple scattered photon detections. If set '
-                                                                       'False, normalize is automatically set to False ')
+                                                                       'False, normalize is automatically set to False')
 def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
          det_pix_x, det_pix_y, lat_displacement, src_to_detector, src_to_iso, photons, force_rerun, force_segment,
-         force_create_object, force_simulate, gpu_id, random_seed, normalize, combine_photons):
+         force_create_object, force_simulate, gpu_id, random_seed, speed_up, combine_photons):
     # #### Setup #############################################
     # create Files, define paths
     if not os.path.exists(path_out):
@@ -660,8 +656,8 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
             pickle.dump([no_sim, det_pix_size, det_pix_x, det_pix_y, lat_displacement,
                          src_to_detector, src_to_iso, photons], f)
 
-        createNumpy(process_path, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename, no_sim,
-                    det_pix_x_halffan, det_pix_x, combine_photons=combine_photons)
+        createNumpy(process_path, path_out,  np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename,
+                    filename, no_sim, det_pix_x_halffan, det_pix_x, combine_photons=combine_photons, speed_up=speed_up)
 
     # read log file
     with open(process_path + "/" + log_filename, "rb") as f:
@@ -669,9 +665,9 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
          src_to_iso, photons = pickle.load(f)
 
     # bring simulation to SimpleITK format and write Geometry file
-    npToNifti(path_out, process_path, out_filename, np_filename, np_air_filename, det_pix_size, normalize=normalize,
-              combine_photons=combine_photons)
-    writeXML(path_out, geo_filename, src_to_iso, src_to_detector, no_sim, lat_displacement)
+    if not speed_up and combine_photons:
+        npToNifti(path_out, process_path, out_filename, np_filename, np_air_filename, det_pix_size)
+        writeXML(path_out, geo_filename, src_to_iso, src_to_detector, no_sim, lat_displacement)
     #############################################################
 
 
