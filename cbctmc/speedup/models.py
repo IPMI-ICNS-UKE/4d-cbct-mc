@@ -96,8 +96,7 @@ class ResidualDenseNet2D(nn.Module):
 
         x_out = self.post_blocks(x_out)
 
-        # skip connection
-        return x + x_out
+        return x_out
 
 
 if __name__ == "__main__":
