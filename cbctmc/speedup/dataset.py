@@ -58,7 +58,7 @@ class MCSpeedUpDataset(Dataset):
         cls,
         folder: Path,
         patient_ids: Sequence[int],
-        runs: Sequence[int] = range(10),
+        runs: Sequence[int] = range(15),
         phases: Sequence[int] = (0, 5),
         projections: Sequence[int] = range(90),
     ) -> "MCSpeedUpDataset":
