@@ -94,7 +94,7 @@ if __name__ == "__main__":
     # ax.scatter(means, vars, s=1, alpha=0.1)
     # ax.plot(np.arange(0, 130), np.arange(0, 130), c='red')
 
-    data_loader = DataLoader(train_dataset, batch_size=8, shuffle=False, num_workers=4)
+    data_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
     device = 'cuda:0'
 
     model = ResidualDenseNet2D(
