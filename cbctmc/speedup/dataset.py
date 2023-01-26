@@ -161,9 +161,6 @@ def createTestDataset(i):
 if __name__ == "__main__":
     dataset = createDataset()
     print(len(dataset))
-    data = []
-    for i in range(300):
-        data.append(np.load(createTestDataset(i))[..., 0])
 
     en = np.loadtxt(
         "/home/crohling/Documents/MC-GPU_v1.3_RELEASE_2012-12-12/neuesSpectra.spc"
