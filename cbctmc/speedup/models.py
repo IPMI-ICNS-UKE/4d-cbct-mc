@@ -106,7 +106,7 @@ class ResidualDenseNet2D(nn.Module):
             growth_rate=self.growth_rate,
             n_blocks=self.n_blocks,
             n_block_layers=self.n_block_layers,
-            convolution_block=self.convolution_block,
+            convolution_block=self.convolution_block.__class__.__name__,
             local_feature_fusion_channels=self.local_feature_fusion_channels,
             pre_block_channels=self.pre_block_channels,
             post_block_channels=self.post_block_channels,
