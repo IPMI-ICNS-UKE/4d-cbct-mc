@@ -98,6 +98,20 @@ class ResidualDenseNet2D(nn.Module):
 
         return x_out
 
+    @property
+    def config(self):
+        return dict(
+            in_channels=self.in_channels,
+            out_channels=self.out_channels,
+            growth_rate=self.growth_rate,
+            n_blocks=self.n_blocks,
+            n_block_layers=self.n_block_layers,
+            convolution_block=self.convolution_block,
+            local_feature_fusion_channels=self.local_feature_fusion_channels,
+            pre_block_channels=self.pre_block_channels,
+            post_block_channels=self.post_block_channels,
+        )
+
 
 if __name__ == "__main__":
     low_photon = torch.ones((1, 1, 512, 384))  # batch_size, n_channels, x_size, y_size
