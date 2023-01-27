@@ -28,6 +28,7 @@ def run():
                       "--random_seed {} --speed_up True".format(seed))
 def run2():
     for i in range(50):
+        i+=50
         seed = np.random.randint(10, 123455463)
         os.system("run_mc --path_ct_in /home/crohling/data/ct/4d_ct_lung_uke_artifact_free/132" +
                   "_4DCT_Lunge_amplitudebased_complete --filename_ct_in phase_00.nii " +
