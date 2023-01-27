@@ -43,6 +43,8 @@ if __name__ == "__main__":
     high_photon_stats = {"max": [], "p99": []}
 
     for data in tqdm(dataset, desc="Calculating dataset stats"):
+        if not data:
+            break
         low_photon_stats["max"].append(data["low_photon"].max())
         low_photon_stats["p99"].append(np.percentile(data["low_photon"], 99))
 
