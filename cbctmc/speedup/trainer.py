@@ -10,6 +10,11 @@ import cbctmc.speedup.metrics as metrics
 
 
 class MCSpeedUpTrainer(BaseTrainer):
+    def __init__(self, *args, max_var_correction: float = 0.1, **kwargs, ):
+        super().__init__(*args, **kwargs)
+
+        self.max_var_correction = max_var_correction
+
     METRICS = {
         "gaussian_nll_loss": MetricType.SMALLER_IS_BETTER,
         "l1_loss": MetricType.SMALLER_IS_BETTER,
@@ -27,7 +32,7 @@ class MCSpeedUpTrainer(BaseTrainer):
         mean = torch.clip(prediction[:, :1] + low_photon, min=0.0)
 
         var = mean / constants.scale_high_fit
-        var_scale = 1 + (F.softsign(prediction[:, 1:]) * 0.1)
+        var_scale = 1 + (F.softsign(prediction[:, 1:]) * self.max_var_correction)
         var = var * var_scale + 1e-6
 
         return mean, var, var_scale
