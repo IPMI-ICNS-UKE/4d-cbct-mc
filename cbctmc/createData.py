@@ -31,7 +31,7 @@ def run2():
         seed = np.random.randint(10, 123455463)
         os.system("run_mc --path_ct_in /home/crohling/data/ct/4d_ct_lung_uke_artifact_free/132" +
                   "_4DCT_Lunge_amplitudebased_complete --filename_ct_in phase_00.nii " +
-                  "--path_out /home/crohling/data/results/high_test" +
+                  f"--path_out /home/crohling/data/results/high_test/test_{i:03d}" +
                   f" --filename test_{i:03d}" +
                   " --no_sim 1 --gpu_id 0 "
                   "--random_seed {} --speed_up True".format(seed))
