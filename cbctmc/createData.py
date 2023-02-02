@@ -12,10 +12,10 @@ def run():
                 seed = np.random.randint(10, 123455463)
                 os.system("run_mc --path_ct_in /home/crohling/data/ct/4d_ct_lung_uke_artifact_free/{}".format(id) +
                           "_4DCT_Lunge_amplitudebased_complete --filename_ct_in phase_0{}.nii ".format(j) +
-                          "--path_out /home/crohling/data/results/low_1e8/low_pat{}".format(id) + "_phase0" + str(j) +
+                          "--path_out /home/crohling/data/results/low_2.4e8/low_pat{}".format(id) + "_phase0" + str(j) +
                           f"_run_{i:02d}" +
                           " --filename low_pat{}".format(id) + "_phase0" + str(j) +
-                          f"_run_{i:02d}" + " --no_sim 90 --photons 1e8 --gpu_id 1 "
+                          f"_run_{i:02d}" + " --no_sim 90 --photons 2.4e8 --gpu_id 1 "
                           "--random_seed {} --speed_up True --combine_photons False".format(seed))
 
 
