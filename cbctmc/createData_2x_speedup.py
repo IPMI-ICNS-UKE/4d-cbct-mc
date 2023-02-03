@@ -15,7 +15,7 @@ def run():
                           "--path_out /home/crohling/data/results/low_1.2e9/low_pat{}".format(id) + "_phase0" + str(j) +
                           f"_run_{i:02d}" +
                           " --filename low_pat{}".format(id) + "_phase0" + str(j) +
-                          f"_run_{i:02d}" + " --no_sim 90 --photons 1.2e9 --gpu_id 1 "
+                          f"_run_{i:02d}" + " --no_sim 90 --photons 1.2e9 --gpu_id 0 "
                           "--random_seed {} --speed_up True --combine_photons False".format(seed))
 
 
