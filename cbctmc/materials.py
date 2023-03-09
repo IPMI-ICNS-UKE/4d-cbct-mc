@@ -133,7 +133,7 @@ def getErr(a, b, xi, xip1, xii, xiip1, norm, formula):
 
 
 def ritaIO(formula):
-    # rita algorithmus for fast and efficient sampling of probability density function accroing to
+    # rita algorithmus for fast and efficient sampling of probability density function according to
     # [Penelope 2006 Sec. 2.1.1 and Sec. 1.2.4]
     enorm = np.arange(0, 5e5, 5)
     xnorm, fnorm = getf2(formula, enorm)

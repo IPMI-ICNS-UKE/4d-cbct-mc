@@ -6,7 +6,12 @@ import pickle
 from tqdm import tqdm
 import multiprocessing
 import shutil
-
+from cbctmc.speedup.models import ResidualDenseNet2D
+import torch
+from cbctmc.speedup.trainer import MCSpeedUpTrainer
+from cbctmc.config import get_user_config
+import cbctmc.speedup.constants as constants
+import math
 
 def segMapToBinary(name):
     # Maps segmentation labels from "Total Segmentator" to an integer
@@ -243,7 +248,7 @@ def getMaterial(hu, mat):
             return "14 1.04"
         elif mat == 13:
             return "13 1.05"
-        elif mat == 2 or mat == -1:
+        elif mat == 2:
             return "2 1.05"
         else:
             return "2 1.05"
@@ -335,9 +340,15 @@ def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, sp
     with open(process_path + "/" + np_air_filename, 'rb') as f:
         air = np.load(f)
 
-
+    if proj.shape[-1] == 2:
+        # proj =  np.sum(proj, axis=-1)
+        proj = proj[...,0]
+    if air.shape[-1] == 2:
+        air = np.sum(air, axis=-1)
     # set half of minimal detection amplitude to every zero energy detection in order to avoid 0 division
+    proj = np.where(proj < 0, 0, proj)
     proj = np.where(proj == 0, 0.5 * np.min(proj[np.nonzero(proj)]), proj)
+    proj = np.where(proj > air, air, proj)
     proj = np.log(air / proj)  # normalize according to x-ray absorption law
 
     proj_im = sitk.GetImageFromArray(proj)
@@ -347,25 +358,21 @@ def npToNifti(path, process_path, out_filename, np_filename, np_air_filename, sp
     sitk.WriteImage(proj_im, path + "/" + out_filename)
 
 
-def readDoseImage(filepath, det_pixel_y, det_pixel_x, combine_photons: bool = True):
+def readDoseImage(filepath, det_pixel_y, det_pixel_x):
     # reads data, adds up nonscattered and scattered photon energy counts and cuts detector image for artificial half
     # fan scan
 
     detenergy = np.loadtxt(filepath, dtype="float")
-    if combine_photons:
-        detenergy = detenergy[:, 0] + detenergy[:, 1] + detenergy[:, 2] + detenergy[:, 3]
-        detenergy = np.reshape(detenergy, (int(detenergy.size / det_pixel_y), -1))
-        detenergy = detenergy[:, 0:det_pixel_x]
-    else:
 
-        detenergy = np.reshape(detenergy, (int(detenergy[:,0].size / det_pixel_y), -1, 4))
-        detenergy = detenergy[:, 0:det_pixel_x, :]
+    detenergy = np.stack((detenergy[:, 0], np.sum(detenergy[:, 1:], axis = 1)), axis=1)
+    detenergy = np.reshape(detenergy, (int(detenergy[:,0].size / det_pixel_y), -1, 2))
+    detenergy = detenergy[:, 0:det_pixel_x]
     detenergy = np.flip(detenergy, 0)
     return detenergy
 
 
 def createNumpy(path, path_out, np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename, filename,
-                no_sim, det_pixel_x_halffan, det_pixel_x, combine_photons: bool = True, speed_up: bool = False):
+                no_sim, det_pixel_x_halffan, det_pixel_x):
     # reads MCGPU output and returns all projections in one Numpy file
     print("Read projection data")
     items = []
@@ -375,7 +382,7 @@ def createNumpy(path, path_out, np_filename, np_air_filename, sim_path, sim_file
         dat = "_" + str(dat[-4:])
         if no_sim == 1:
             dat = ""
-        items.append((sim_path + "/" + sim_filename + dat, det_pixel_x_halffan, det_pixel_x, combine_photons))
+        items.append((sim_path + "/" + sim_filename + dat, det_pixel_x_halffan, det_pixel_x))
     with multiprocessing.Pool() as pool:
         for results in pool.starmap(readDoseImage, tqdm(items)):
             proj.append(results)
@@ -385,15 +392,10 @@ def createNumpy(path, path_out, np_filename, np_air_filename, sim_path, sim_file
 
     proj = proj.astype(np.float32)
     air = air.astype(np.float32)
-    if not speed_up:
-        with open(path + "/" + np_filename, 'wb') as f:
-            np.save(f, proj)
-        with open(path + "/" + np_air_filename, 'wb') as f:
-            np.save(f, air)
-    else:
-        for i in range(no_sim):
-            with open(path_out + "/" + filename + f"_proj_{i:02d}.npy", 'wb') as f:
-                np.save(f, proj[i, ...])
+    with open(path + "/" + np_filename, 'wb') as f:
+        np.save(f, proj)
+    with open(path + "/" + np_air_filename, 'wb') as f:
+        np.save(f, air)
 
 
 def writeXML(path, geo_filename, src_to_iso, src_to_det, no, lat_displacement):
@@ -430,7 +432,7 @@ def writeXML(path, geo_filename, src_to_iso, src_to_det, no, lat_displacement):
 def writeInputFile(path, filename, sim_filename, sim_air_filename, vox_filename,
                    vox_air_filename, in_filename, in_air_filename, ct_size, ct_spacing, photons,
                    src_to_iso, src_to_det, no, lat_displacement, det_pix_x, det_pix_y, det_pixel_size,
-                   det_pix_x_halffan, air=False, random_seed=42):
+                   det_pix_x_halffan, air=False, random_seed=42, speed_up: bool=True):
     # writes input file according to the MC-GPU standard, commented material files are used for Catphan 604 calibration
     print("Writing input file")
     size_x = ct_size[0] * ct_spacing[0]
@@ -568,11 +570,100 @@ def runSimulation(path, gpu_id: int = 0):
     os.system(f"docker run --rm --gpus device={gpu_id} -v $(pwd)/input:/input -v $(pwd)/output:/output -u $(id -u):$(id -g) "
               "imaging MC-GPU_v1.3.x /input/input_air.in")
 
+
+def batch_array(array: np.ndarray, batch_size: int = 32):
+    n_total = array.shape[0]
+    n_batches = math.ceil(n_total / batch_size)
+
+    for i_batch in range(n_batches):
+        yield array[i_batch * batch_size : (i_batch + 1) * batch_size]
+
+
+def runModel(process_path, np_filename):
+    with open(process_path + "/" + np_filename, 'rb') as f:
+        proj = np.load(f)
+    proj = np.moveaxis(proj, -1, 1)
+    user, config = get_user_config()
+    model = ResidualDenseNet2D(
+        in_channels=1,
+        out_channels=2,
+        growth_rate=8,
+        n_blocks=4,
+        n_block_layers=8,)
+    model_scat = ResidualDenseNet2D(
+        in_channels=1,
+        out_channels=2,
+        growth_rate=8,
+        n_blocks=4,
+        n_block_layers=8,)
+    # state = torch.load("/home/crohling/amalthea/data/runs_clemens/570122d74c354d758b045c23/models/validation/"
+    #                    "step_300000.pth", map_location=config["device"])
+    # state = torch.load("/home/crohling/amalthea/data/runs_frederic/6eddb74e391f4a5e9357faa3/models/validation/step_680000.pth", map_location=config["device"])
+    state = torch.load(
+        "/home/crohling/Documents/runs/runs_clemens/0071a830e02148bfb40c4dba/models/training/step_87500.pth",
+        map_location=config["device"])
+    model.load_state_dict(state["model"])
+    model.eval()
+    state_scat = torch.load(
+        "/home/crohling/Documents/runs/runs_clemens/702825f1093049819415c668/models/training/step_21000.pth",
+        map_location=config["device"])
+    model_scat.load_state_dict(state_scat["model"])
+    model_scat.eval()
+
+    trainer = MCSpeedUpTrainer(
+        model=model,
+        optimizer=None,
+        train_loader=None,
+        val_loader=None,
+        run_folder=None,
+        experiment_name=None,
+        scheduler=None,
+        device=config["device"],
+        max_var_correction=0.5,
+        scatter = False
+    )
+    trainer_scat = MCSpeedUpTrainer(
+        model=model_scat,
+        optimizer=None,
+        train_loader=None,
+        val_loader=None,
+        run_folder=None,
+        experiment_name=None,
+        scheduler=None,
+        device=config["device"],
+        max_var_correction=0.5,
+        scatter = True
+    )
+    high_proj = np.empty((0, proj.shape[2], proj.shape[3]))
+
+    for batch in tqdm(batch_array(proj, batch_size=6)):
+
+        low_photon = torch.as_tensor(batch, device=config["device"], dtype=torch.float32)
+        with torch.autocast(device_type="cuda", enabled=True), torch.inference_mode():
+            mean, energy_scale = trainer.forward_pass(low_photon[:,:1])
+            mean_scat, energy_scale_scat = trainer_scat.forward_pass(low_photon[:,1:])
+        speedup_sample = torch.distributions.Poisson(
+            rate=mean
+        ).sample()
+        speedup_sample += torch.distributions.Poisson(
+            rate=mean_scat
+        ).sample()
+        speedup_sample = speedup_sample/constants.scale_high_fit
+        speedup_sample = speedup_sample.detach().cpu().numpy()[:, 0]
+
+        high_proj = np.concatenate((high_proj, speedup_sample), axis= 0)
+    proj = np.moveaxis(proj, 1, -1)
+    np.save(process_path + "/" + np_filename, high_proj)
+    np.save(process_path + "/" + "old_" + np_filename, proj)
+
 @click.command()
 @click.option('--path_ct_in', help='Path to ct file')
 @click.option('--filename_ct_in', help='CT filename')
 @click.option('--path_out', help='Desired Output folder')
 @click.option('--filename', help='Desired Output file name')
+@click.option('--speed_up', default=True, type=click.BOOL, help='If speed_up = True 4.8e8 photons are simulated and the '
+                                                                'trained ResDenseNet denoises the projection equivalent'
+                                                                ' to 2.4e9 photons ')
 @click.option('--no_sim', default=894, help='Number of Projections.')
 @click.option('--det_pix_size', default=0.776, help='Size of one Detector pixel in mm')
 @click.option('--det_pix_x', default=512, help='Number of Detector-pixel in X-Direction')
@@ -580,22 +671,17 @@ def runSimulation(path, gpu_id: int = 0):
 @click.option('--lat_displacement', default=-160, help='If cbct is used in half fan mode, give lateral displacement')
 @click.option('--src_to_detector', default=1500, help='Distance between X-Ray source and detector in mm')
 @click.option('--src_to_iso', default=1000, help='Distance between X-Ray source and rotation center in mm')
-@click.option('--photons', default=2.4e9, help='Number of photons to Simulate for each projection')
+@click.option('--photons', default=2.4e9, help='Number of photons to Simulate for each projection, only valid if '
+                                               'speed_up is set False.')
 @click.option('--force_rerun', default=False, help='Set force_rerun=True to redo everything')
 @click.option('--force_segment', default=False, help='Set force_segment=True to redo segmentation')
 @click.option('--force_create_object', default=False, help='Set force_create_object=True to redo the object')
 @click.option('--force_simulate', default=False, help='Set force_simulate=True to redo simulation')
 @click.option('--gpu_id', default=0, type=click.INT, help='PCI ID of GPU for MC simulation')
 @click.option('--random_seed', default=42, type=click.INT, help='Random seed for MC simulation')
-@click.option('--speed_up', default=False, type=click.BOOL, help='Set speed_up TRUE to get Raw, unnormalized '
-                                                                 'Simulation data as npy for each Proj')
-@click.option('--combine_photons', default=True, type=click.BOOL, help='Set combine_photons = False to get 4 outputs,'
-                                                                       'containing non -, compton - , rayleigh and '
-                                                                       'multiple scattered photon detections. If set '
-                                                                       'False, normalize is automatically set to False')
-def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
+def run(path_ct_in, filename_ct_in, path_out, filename, speed_up, no_sim, det_pix_size,
          det_pix_x, det_pix_y, lat_displacement, src_to_detector, src_to_iso, photons, force_rerun, force_segment,
-         force_create_object, force_simulate, gpu_id, random_seed, speed_up, combine_photons):
+         force_create_object, force_simulate, gpu_id, random_seed):
     # #### Setup #############################################
     # create Files, define paths
     if not os.path.exists(path_out):
@@ -632,6 +718,7 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
     log_filename = "log.pkl"
 
 
+
     # create sitk Images
     img_ct = sitk.ReadImage(path_ct_in + "/" + filename_ct_in)
     img_np = sitk.GetArrayFromImage(img_ct)
@@ -648,19 +735,21 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
     # Create Voxel Object
     if not os.path.exists(vox_path + "/" + vox_filename) or force_create_object or force_rerun:
         writeVoxel(img_ct, img_np, img_seg, vox_path, path_out, vox_filename, vox_air_filename)
-    shutil.copyfile(vox_path + "/" + vox_filename, input_path + "/" + vox_filename)
-    shutil.copyfile(vox_path + "/" + vox_air_filename, input_path + "/" + vox_air_filename)
 
     # Prepare and Run MC-GPU Simulation
     if not os.path.exists(process_path + "/" + log_filename) or force_simulate or force_rerun:
+        shutil.copyfile(vox_path + "/" + vox_filename, input_path + "/" + vox_filename)
+        shutil.copyfile(vox_path + "/" + vox_air_filename, input_path + "/" + vox_air_filename)
+        if speed_up:
+            photons = 4.8e8
         writeInputFile(input_path, filename, sim_filename, sim_air_filename, vox_filename,
                        vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(), photons,
                        src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
                        det_pix_y, det_pix_size, det_pix_x_halffan, random_seed=random_seed)
         writeInputFile(input_path, filename, sim_filename, sim_air_filename, vox_filename,
-                       vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(), photons,
+                       vox_air_filename, in_filename, in_air_filename, img_ct.GetSize(), img_ct.GetSpacing(), 2.4e9,
                        src_to_iso, src_to_detector, no_sim, lat_displacement, det_pix_x,
-                       det_pix_y, det_pix_size, det_pix_x_halffan, air=True, random_seed=random_seed)
+                       det_pix_y, det_pix_size, det_pix_x_halffan, air=True, random_seed=random_seed, speed_up=speed_up)
         runSimulation(path_out, gpu_id=gpu_id)
         os.remove(input_path + "/" + vox_filename)
         # create log file
@@ -669,17 +758,22 @@ def run(path_ct_in, filename_ct_in, path_out, filename, no_sim, det_pix_size,
                          src_to_detector, src_to_iso, photons], f)
 
         createNumpy(process_path, path_out,  np_filename, np_air_filename, sim_path, sim_filename, sim_air_filename,
-                    filename, no_sim, det_pix_x_halffan, det_pix_x, combine_photons=combine_photons, speed_up=speed_up)
+                    filename, no_sim, det_pix_x_halffan, det_pix_x)
 
     # read log file
     with open(process_path + "/" + log_filename, "rb") as f:
         no_sim, det_pix_size, det_pix_x, det_pix_y, lat_displacement, src_to_detector, \
          src_to_iso, photons = pickle.load(f)
 
+    # if speed_up use trained ResDenseNet to create 2.4e9 Photon equivalent projections out of 5e7 photon simulations
+    if speed_up and not os.path.exists(process_path + "/" + "old_" + np_filename):
+        runModel(process_path, np_filename)
+    if speed_up:
+        npToNifti(path_out, process_path, "old_" + out_filename, "old_" + np_filename, np_air_filename, det_pix_size)
     # bring simulation to SimpleITK format and write Geometry file
-    if not speed_up and combine_photons:
-        npToNifti(path_out, process_path, out_filename, np_filename, np_air_filename, det_pix_size)
-        writeXML(path_out, geo_filename, src_to_iso, src_to_detector, no_sim, lat_displacement)
+
+    npToNifti(path_out, process_path, out_filename, np_filename, np_air_filename, det_pix_size)
+    writeXML(path_out, geo_filename, src_to_iso, src_to_detector, no_sim, lat_displacement)
     #############################################################
 
 
