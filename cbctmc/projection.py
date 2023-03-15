@@ -127,7 +127,8 @@ def create_geometry(
     arc: float = 360.0,
 ) -> rtk.ThreeDCircularProjectionGeometry:
     """Generates a RTK geometry that can be used for, e.g., forward projection
-    or reconstruction.
+    or reconstruction. The default values are set according to the half-fan
+    beam configuration of the Varian TrueBeam.
 
     :param start_angle:
     :type start_angle:
