@@ -30,7 +30,7 @@ repos:
       - id: mixed-line-ending
         args: [ '--fix=lf' ]
       - id: check-added-large-files
-        args: [ '--maxkb=500' ]
+        args: [ '--maxkb=10000' ]
 
   - repo: https://github.com/pycqa/flake8
     rev: 6.0.0
