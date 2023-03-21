@@ -10,4 +10,5 @@ setup(
             "run_mc = cbctmc.main:run",
         ],
     },
+    package_data={"cbctmc": ["*.jinja2", "*.mcgpu"]},
 )
