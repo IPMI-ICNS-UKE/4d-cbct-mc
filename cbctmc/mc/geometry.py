@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections import UserList
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import List, Sequence, Tuple, Union
 
 import numpy as np
 
+from cbctmc.common_types import PathLike
 from cbctmc.mc.materials import MATERIALS_125KEV, Material
 
 
@@ -104,7 +106,7 @@ class BaseMultiMaterialMapper(BaseMaterialMapper):
                 densities_output=densities_output,
             )
 
-        return materials, densities
+        return materials_output, densities_output
 
 
 class BoneMaterialMapper(BaseMultiMaterialMapper):
@@ -193,9 +195,52 @@ class FatMaterialMapper(SingleMaterialMapper):
         super().__init__(target_material=MATERIALS_125KEV["adipose"])
 
 
-class MaterialMapperPipeline:
-    def append(self):
-        pass
+class MaterialMapperPipeline(
+    UserList[Tuple[BaseMaterialMapper, Union[np.ndarray, PathLike]]]
+):
+    def execute(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        materials = None
+        densities = None
+        for mapper, segmentation in self:
+            if segmentation is not None and not isinstance(segmentation, np.ndarray):
+                # load segmentation from file and convert to numpy array
+                segmentation = sitk.ReadImage(str(segmentation))
+                segmentation = sitk.GetArrayFromImage(segmentation).swapaxes(0, 2)
+                segmentation = np.asarray(segmentation, dtype=np.uint8)
+            materials, densities = mapper.map(
+                image=image,
+                segmentation=segmentation,
+                materials_output=materials,
+                densities_output=densities,
+            )
+
+        return materials, densities
+
+    @classmethod
+    def create_default_pipeline(
+        cls,
+        body_segmentation: np.ndarray | PathLike,
+        bone_segmentation: np.ndarray | PathLike,
+        muscle_segmentation: np.ndarray | PathLike,
+        fat_segmentation: np.ndarray | PathLike,
+        liver_segmentation: np.ndarray | PathLike,
+        stomach_segmentation: np.ndarray | PathLike,
+        lung_segmentation: np.ndarray | PathLike,
+        lung_vessel_segmentation: np.ndarray | PathLike,
+    ):
+        pipeline = [
+            (BodyROIMaterialMapper(), body_segmentation),
+            (BoneMaterialMapper(), bone_segmentation),
+            (LungMaterialMapper(), lung_segmentation),
+            (LiverMaterialMapper(), liver_segmentation),
+            (StomachMaterialMapper(), stomach_segmentation),
+            (MuscleMaterialMapper(), muscle_segmentation),
+            (FatMaterialMapper(), fat_segmentation),
+            (AirMaterialMapper(), body_segmentation),
+            (LungVesselsMaterialMapper(), lung_vessel_segmentation),
+        ]
+
+        return cls(pipeline)
 
 
 if __name__ == "__main__":
@@ -208,64 +253,20 @@ if __name__ == "__main__":
     )
 
     image = sitk.ReadImage(str(folder / "phase_00.nii"))
-
     image = sitk.GetArrayFromImage(image).swapaxes(0, 2)
 
-    materials = np.zeros_like(image, dtype=np.uint8)
-    densities = np.zeros_like(image, dtype=np.float32)
+    mapper_pipeline = MaterialMapperPipeline.create_default_pipeline(
+        body_segmentation=folder / "segmentations/phase_00/body.nii.gz",
+        bone_segmentation=folder / "segmentations/phase_00/upper_body_bones.nii.gz",
+        muscle_segmentation=folder / "segmentations/phase_00/upper_body_muscles.nii.gz",
+        fat_segmentation=folder / "segmentations/phase_00/upper_body_fat.nii.gz",
+        liver_segmentation=folder / "segmentations/phase_00/liver.nii.gz",
+        stomach_segmentation=folder / "segmentations/phase_00/stomach.nii.gz",
+        lung_segmentation=folder / "segmentations/phase_00/lung.nii.gz",
+        lung_vessel_segmentation=folder / "segmentations/phase_00/lung_vessels.nii.gz",
+    )
 
-    mappers = [
-        (
-            BodyROIMaterialMapper(),
-            folder / "segmentations/phase_00/body.nii.gz",
-        ),
-        (
-            BoneMaterialMapper(),
-            folder / "segmentations/phase_00/upper_body_bones.nii.gz",
-        ),
-        (
-            LungMaterialMapper(),
-            folder / "segmentations/phase_00/lung.nii.gz",
-        ),
-        (
-            LiverMaterialMapper(),
-            folder / "segmentations/phase_00/liver.nii.gz",
-        ),
-        (
-            StomachMaterialMapper(),
-            folder / "segmentations/phase_00/liver.nii.gz",
-        ),
-        (
-            MuscleMaterialMapper(),
-            folder / "segmentations/phase_00/upper_body_muscles.nii.gz",
-        ),
-        (
-            FatMaterialMapper(),
-            folder / "segmentations/phase_00/upper_body_fat.nii.gz",
-        ),
-        (
-            AirMaterialMapper(),
-            folder / "segmentations/phase_00/body.nii.gz",
-        ),
-        (
-            LungVesselsMaterialMapper(),
-            folder / "segmentations/phase_00/lung_vessels.nii.gz",
-        ),
-    ]
-
-    for mapper, segmentation in mappers:
-        if segmentation:
-            segmentation = sitk.ReadImage(segmentation)
-            segmentation = sitk.GetArrayFromImage(segmentation).swapaxes(0, 2)
-        else:
-            segmentation = None
-        print(mapper)
-        materials, densities = mapper.map(
-            image=image,
-            segmentation=segmentation,
-            materials_output=materials,
-            densities_output=densities,
-        )
+    materials, densities = mapper_pipeline.execute(image)
 
     fig, ax = plt.subplots(1, 3, sharex=True, sharey=True)
     ax[0].imshow(image[:, :, 66])
