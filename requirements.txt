@@ -6,4 +6,3 @@ tqdm~=4.64.1
 matplotlib~=3.5.3
 scipy~=1.9.3
 tables~=3.7.0
-TotalSegmentator==1.3
