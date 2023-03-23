@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Tuple
 
 import pkg_resources
 
@@ -20,9 +21,17 @@ class Material:
         return Material.get_material_number(self.identifier)
 
     @staticmethod
-    def get_material_number(material_id: str) -> int:
+    def get_material_number(
+        material_id: str, materials: dict[str, "Material"] = None
+    ) -> int:
+        """Returns the material number used by geometry files of MC-GPU.
+
+        If no materials are given, the default materials
+        MATERIALS_125KEV are used.
+        """
+        materials = materials or MATERIALS_125KEV
         try:
-            return MATERIAL_IDENTIFIERS.index(material_id) + 1
+            return list(materials.keys()).index(material_id) + 1
         except ValueError:
             raise ValueError(f"Material {material_id} not found")
 
@@ -59,13 +68,22 @@ class Material:
 
         return header
 
+    @staticmethod
+    def get_identifier_from_filename(filepath: PathLike) -> str:
+        """Return the material identifier, i.e.
+
+        <material_identifier>__<min_keV>_<max_keV>kev.mcgpu.
+        """
+        filepath = Path(filepath)
+        return str(filepath.name).split("__")[0]
+
     @classmethod
     def from_file(cls, filepath: PathLike):
         filepath = Path(filepath)
         header = Material.parse_material_file_header(filepath)
 
         return cls(
-            identifier=str(filepath.name).split("__")[0],
+            identifier=Material.get_identifier_from_filename(filepath),
             name=header["name"],
             chemical_formula=header["chemical_formula"],
             density=header["nominal_density"],
@@ -81,32 +99,21 @@ class Material:
         return cls.from_file(filepath)
 
 
-# this list defines the material number/order used for MC-GPU input files
-MATERIAL_IDENTIFIERS = [
-    "acryl",
-    "adipose",
-    "air",
-    "blood",
-    "bone_020",
-    "bone_050",
-    "bone_100",
-    "cartilage",
-    "delrin",
-    "glands_others",
-    "h20",
-    "ldpe",
-    "liver",
-    "lung",
-    "muscle_tissue",
-    "pmp",
-    "polystrene",
-    "red_marrow",
-    "soft_tissue",
-    "stomach_intestines",
-    "teflon",
-]
+def _get_material_identifiers(kev_range: Tuple[int, int] = (5, 125)) -> List[str]:
+    folder = pkg_resources.resource_filename("cbctmc", "assets/material_files")
+    folder = Path(folder)
+    all_materials = sorted(folder.glob(f"*__{kev_range[0]}_{kev_range[1]}kev.mcgpu"))
+
+    return [
+        Material.get_identifier_from_filename(filepath) for filepath in all_materials
+    ]
+
 
 MATERIALS_125KEV = {
     material_id: Material.from_package_resources(f"{material_id}__5_125kev.mcgpu")
-    for material_id in MATERIAL_IDENTIFIERS
+    for material_id in _get_material_identifiers()
 }
+
+# this dict defines the material number/order used for MC-GPU input files
+# the keys are sorted by material density
+MATERIALS_125KEV = dict(sorted(MATERIALS_125KEV.items(), key=lambda x: x[1].density))
