@@ -35,8 +35,8 @@ class BaseMaterialMapper(ABC):
         materials_output: np.ndarray | None = None,
         densities_output: np.ndarray | None = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Maps Hounsfield values of image to material file numbers and
-        desities using given segmentation.
+        """Maps segmented volume of image to material file numbers and
+        densities using given segmentation.
 
         Returns two arrays (materials and densities).
         """
@@ -205,6 +205,7 @@ class MaterialMapperPipeline(
             if segmentation is not None and not isinstance(segmentation, np.ndarray):
                 # load segmentation from file and convert to numpy array
                 segmentation = sitk.ReadImage(str(segmentation))
+                # convert to numpy, swap zyx (itk) -> xyz (numpy)
                 segmentation = sitk.GetArrayFromImage(segmentation).swapaxes(0, 2)
                 segmentation = np.asarray(segmentation, dtype=np.uint8)
             materials, densities = mapper.map(
@@ -228,6 +229,7 @@ class MaterialMapperPipeline(
         lung_segmentation: np.ndarray | PathLike,
         lung_vessel_segmentation: np.ndarray | PathLike,
     ):
+        # the order is important
         pipeline = [
             (BodyROIMaterialMapper(), body_segmentation),
             (BoneMaterialMapper(), bone_segmentation),
