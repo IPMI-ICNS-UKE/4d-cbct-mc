@@ -21,7 +21,7 @@ def create_ct_segmentations(
     for model in models:
         # rename it for TotalSegmentator
         if model == "bones_tissue":
-            models = "bones_tissue_test"
+            model = "bones_tissue_test"
         logger.info(
             f"Start segmentation of {image_filepath!s} "
             f"using {model=} on GPU (PCI {gpu_id})"
@@ -89,3 +89,46 @@ def merge_upper_body_fat_segmentations(folder: PathLike):
         glob_patterns=glob_patterns,
         output_filename="upper_body_fat.nii.gz",
     )
+
+
+if __name__ == "__main__":
+    from ipmi.common.logger import init_fancy_logging
+
+    init_fancy_logging()
+
+    logger.setLevel(logging.INFO)
+
+    image_filepaths = sorted(
+        Path("/datalake2/Totalsegmentator_dataset").glob("*/ct.nii.gz")
+    )
+
+    image_filepaths = sorted(Path("/datalake/mega/luna16/images").glob("*mhd"))
+
+    for image_filepath in image_filepaths:
+        print(image_filepath)
+        image = sitk.ReadImage(str(image_filepath))
+        sitk.WriteImage(
+            image,
+            f"/datalake2/luna16/images_nii/{image_filepath.with_suffix('.nii').name}",
+        )
+
+    image_filepaths = sorted(Path("/datalake2/luna16/images_nii").glob("*"))
+
+    for image_filepath in image_filepaths:
+        output_folder = (
+            image_filepath.parent / "predicted_segmentations" / image_filepath.stem
+        )
+        if (output_folder / "subcutaneous_fat.nii.gz").exists():
+            logger.info(f"Skipping {image_filepath}")
+            continue
+        output_folder.mkdir(parents=True, exist_ok=True)
+
+        try:
+            create_ct_segmentations(
+                image_filepath=image_filepath,
+                output_folder=output_folder,
+                gpu_id=1,
+                models=("total", "body", "lung_vessels", "bones_tissue"),
+            )
+        except Exception as e:
+            print(e)

@@ -1,12 +1,17 @@
 from dataclasses import dataclass
 from typing import Tuple
 
+from cbctmc.mc.materials import MATERIALS_125KEV
+from cbctmc.mc.spectrum import SPECTRUM_125KVP
+
 
 @dataclass
 class DefaultVarianScanParameters:
     n_projections: int = 894
     # detector_pixel_size is given in mm (x, y)
     detector_pixel_size: Tuple[float, float] = (0.388, 0.388)
+    detector_lateral_displacement: float = -160.0
+
     # source_to_detector_distance is given in mm
     source_to_detector_distance: float = 1500.0
     # source_to_isocenter_distance is given in mm
@@ -15,6 +20,13 @@ class DefaultVarianScanParameters:
 
 @dataclass
 class DefaultMCSimulationParameters:
+    spectrum = SPECTRUM_125KVP
+    spectrum_filepath = SPECTRUM_125KVP.filepath
+
+    material_filepaths = tuple(
+        material.filepath for material in MATERIALS_125KEV.values()
+    )
+
     n_histories: int = int(2.4e9)
     n_projections = DefaultVarianScanParameters.n_projections
     # default 2pi arc for default half-fan mode
@@ -22,7 +34,8 @@ class DefaultMCSimulationParameters:
 
     # n_detector_pixels is given in number of pixels (x, y)
     n_detector_pixels: Tuple[int, int] = (924, 384)
-    # n_detector_pixels is given in mm (x, y)
+    n_detector_pixels_half_fan: Tuple[int, int] = (512, 384)
+    # detector_size is given in mm (x, y)
     detector_size: Tuple[float, float] = (717.312, 297.984)
 
     # source_to_detector_distance is given in mm

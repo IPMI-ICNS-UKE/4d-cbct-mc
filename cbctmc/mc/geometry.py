@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+import gzip
+import logging
+import pickle
+import time
 from abc import ABC, abstractmethod
 from collections import UserList
 from pathlib import Path
 from typing import List, Sequence, Tuple, Union
 
 import numpy as np
+import pkg_resources
+import SimpleITK as sitk
+from jinja2 import Environment, FileSystemLoader
 
 from cbctmc.common_types import PathLike
+from cbctmc.mc.dataio import save_text_file
 from cbctmc.mc.materials import MATERIALS_125KEV, Material
+from cbctmc.mc.voxel_data import compile_voxel_data_string
+
+logger = logging.getLogger(__name__)
 
 
 class BaseMaterialMapper(ABC):
@@ -20,8 +31,8 @@ class BaseMaterialMapper(ABC):
     ):
         mask = segmentation > 0
         if materials_output is None:
-            materials = np.zeros_like(image, dtype=np.uint8)
-            densities = np.zeros_like(image, dtype=np.float32)
+            materials = np.zeros_like(segmentation, dtype=np.uint8)
+            densities = np.zeros_like(segmentation, dtype=np.float32)
         else:
             materials = materials_output
             densities = densities_output
@@ -55,6 +66,9 @@ class BaseMaterialMapper(ABC):
     @abstractmethod
     def map(self, *args, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
         raise NotImplementedError
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}()"
 
 
 class SingleMaterialMapper(BaseMaterialMapper):
@@ -196,13 +210,18 @@ class FatMaterialMapper(SingleMaterialMapper):
 
 
 class MaterialMapperPipeline(
-    UserList[Tuple[BaseMaterialMapper, Union[np.ndarray, PathLike]]]
+    UserList[Tuple[BaseMaterialMapper, Union[np.ndarray, PathLike, None]]]
 ):
     def execute(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         materials = None
         densities = None
         for mapper, segmentation in self:
-            if segmentation is not None and not isinstance(segmentation, np.ndarray):
+            if segmentation is None:
+                logger.info(f"Skipping {mapper}")
+                continue
+
+            logger.info(f"Executing {mapper}")
+            if not isinstance(segmentation, np.ndarray):
                 # load segmentation from file and convert to numpy array
                 segmentation = sitk.ReadImage(str(segmentation))
                 # convert to numpy, swap zyx (itk) -> xyz (numpy)
@@ -220,14 +239,14 @@ class MaterialMapperPipeline(
     @classmethod
     def create_default_pipeline(
         cls,
-        body_segmentation: np.ndarray | PathLike,
-        bone_segmentation: np.ndarray | PathLike,
-        muscle_segmentation: np.ndarray | PathLike,
-        fat_segmentation: np.ndarray | PathLike,
-        liver_segmentation: np.ndarray | PathLike,
-        stomach_segmentation: np.ndarray | PathLike,
-        lung_segmentation: np.ndarray | PathLike,
-        lung_vessel_segmentation: np.ndarray | PathLike,
+        body_segmentation: np.ndarray | PathLike | None = None,
+        bone_segmentation: np.ndarray | PathLike | None = None,
+        muscle_segmentation: np.ndarray | PathLike | None = None,
+        fat_segmentation: np.ndarray | PathLike | None = None,
+        liver_segmentation: np.ndarray | PathLike | None = None,
+        stomach_segmentation: np.ndarray | PathLike | None = None,
+        lung_segmentation: np.ndarray | PathLike | None = None,
+        lung_vessel_segmentation: np.ndarray | PathLike | None = None,
     ):
         # the order is important
         pipeline = [
@@ -245,32 +264,140 @@ class MaterialMapperPipeline(
         return cls(pipeline)
 
 
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    import SimpleITK as sitk
+class MCGeometry:
+    def __init__(
+        self,
+        materials: np.ndarray,
+        densities: np.ndarray,
+        image_spacing: Tuple[float, float, float],
+    ):
+        self.materials = materials
+        self.densities = densities
+        self.image_spacing = image_spacing
 
-    folder = Path(
-        "/datalake_fast/4d_ct_lung_uke_artifact_free/"
-        "022_4DCT_Lunge_amplitudebased_complete"
-    )
+    @property
+    def image_shape(self) -> Tuple[int, int, int]:
+        return self.materials.shape
 
-    image = sitk.ReadImage(str(folder / "phase_00.nii"))
-    image = sitk.GetArrayFromImage(image).swapaxes(0, 2)
+    @property
+    def image_size(self) -> Tuple[float, float, float]:
+        return tuple(sh * sp for (sh, sp) in zip(self.image_shape, self.image_spacing))
 
-    mapper_pipeline = MaterialMapperPipeline.create_default_pipeline(
-        body_segmentation=folder / "segmentations/phase_00/body.nii.gz",
-        bone_segmentation=folder / "segmentations/phase_00/upper_body_bones.nii.gz",
-        muscle_segmentation=folder / "segmentations/phase_00/upper_body_muscles.nii.gz",
-        fat_segmentation=folder / "segmentations/phase_00/upper_body_fat.nii.gz",
-        liver_segmentation=folder / "segmentations/phase_00/liver.nii.gz",
-        stomach_segmentation=folder / "segmentations/phase_00/stomach.nii.gz",
-        lung_segmentation=folder / "segmentations/phase_00/lung.nii.gz",
-        lung_vessel_segmentation=folder / "segmentations/phase_00/lung_vessels.nii.gz",
-    )
+    def save(self, filepath: PathLike):
+        filepath = Path(filepath)
+        with gzip.open(filepath, "wb", compresslevel=6) as f:
+            pickle.dump(self, f)
 
-    materials, densities = mapper_pipeline.execute(image)
+    @classmethod
+    def load(cls, filepath: PathLike) -> MCGeometry:
+        with gzip.open(filepath, "rb") as f:
+            instance = pickle.load(f)
 
-    fig, ax = plt.subplots(1, 3, sharex=True, sharey=True)
-    ax[0].imshow(image[:, :, 66])
-    ax[1].imshow(materials[:, :, 66])
-    ax[2].imshow(densities[:, :, 66])
+        return instance
+
+    def save_mcgpu_geometry(self, filepath: PathLike, compress: bool = True):
+        contents = MCGeometry.create_mcgpu_geometry(
+            materials=self.materials,
+            densities=self.densities,
+            image_spacing=self.image_spacing,
+        )
+
+        save_text_file(
+            contents,
+            output_filepath=filepath,
+            compress=compress,
+            content_type="MC-GPU geometry file",
+        )
+
+    @classmethod
+    def from_image(
+        cls,
+        image_filepath: PathLike,
+        body_segmentation_filepath: PathLike | None = None,
+        bone_segmentation_filepath: PathLike | None = None,
+        muscle_segmentation_filepath: PathLike | None = None,
+        fat_segmentation_filepath: PathLike | None = None,
+        liver_segmentation_filepath: PathLike | None = None,
+        stomach_segmentation_filepath: PathLike | None = None,
+        lung_segmentation_filepath: PathLike | None = None,
+        lung_vessel_segmentation_filepath: PathLike | None = None,
+    ) -> MCGeometry:
+        image = sitk.ReadImage(str(image_filepath))
+        image_spacing = image.GetSpacing()
+        # convert to numpy, swap zyx (itk) -> xyz (numpy)
+        image = sitk.GetArrayFromImage(image).swapaxes(0, 2)
+
+        mapper_pipeline = MaterialMapperPipeline.create_default_pipeline(
+            body_segmentation=body_segmentation_filepath,
+            bone_segmentation=bone_segmentation_filepath,
+            muscle_segmentation=muscle_segmentation_filepath,
+            fat_segmentation=fat_segmentation_filepath,
+            liver_segmentation=liver_segmentation_filepath,
+            stomach_segmentation=stomach_segmentation_filepath,
+            lung_segmentation=lung_segmentation_filepath,
+            lung_vessel_segmentation=lung_vessel_segmentation_filepath,
+        )
+
+        materials, densities = mapper_pipeline.execute(image)
+
+        return cls(
+            materials=materials, densities=densities, image_spacing=image_spacing
+        )
+
+    @staticmethod
+    def create_mcgpu_geometry(
+        materials: np.ndarray,
+        densities: np.ndarray,
+        image_spacing: Tuple[float, float, float],
+    ) -> str:
+        if materials.shape != densities.shape:
+            raise ValueError(
+                f"Shape mismatch: {materials.shape=} != {densities.shape=}"
+            )
+        n_voxels_x, n_voxels_y, n_voxels_z = materials.shape
+        # Note: MC-GPU uses cm instead of mm (thus dividing by 10)
+        params = {
+            "n_voxels_x": n_voxels_x,
+            "n_voxels_y": n_voxels_y,
+            "n_voxels_z": n_voxels_z,
+            "voxel_spacing_x": image_spacing[0] / 10.0,
+            "voxel_spacing_y": image_spacing[1] / 10.0,
+            "voxel_spacing_z": image_spacing[2] / 10.0,
+        }
+
+        logger.info(
+            f"Creating MC-GPU geometry file with the following parameters: {params}"
+        )
+
+        # add voxel_data here, so it does not get logged
+        t_start = time.monotonic()
+        voxel_data = compile_voxel_data_string(materials=materials, densities=densities)
+        t_end = time.monotonic()
+        params["voxel_data"] = voxel_data
+
+        logger.info(
+            f"Compiling geometry voxel data string took: {t_end - t_start:.2f} seconds"
+        )
+
+        assets_folder = pkg_resources.resource_filename("cbctmc", "assets/templates")
+        environment = Environment(loader=FileSystemLoader(assets_folder))
+        template = environment.get_template("mcgpu_geometry.jinja2")
+        rendered = template.render(params)
+
+        return rendered
+
+
+class MCAirGeometry(MCGeometry):
+    def __init__(
+        self, image_spacing: Tuple[float, float, float] = (1500.0, 1500.0, 1500.0)
+    ):
+        air_material = MATERIALS_125KEV["air"]
+
+        materials = np.full((1, 1, 1), fill_value=air_material.number, dtype=np.uint8)
+        densities = np.full(
+            (1, 1, 1), fill_value=air_material.density, dtype=np.float32
+        )
+
+        super().__init__(
+            materials=materials, densities=densities, image_spacing=image_spacing
+        )

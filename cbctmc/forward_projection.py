@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from typing import Tuple
 
@@ -12,7 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 def prepare_image_for_rtk(
-    image: itk.Image, output_value_range: Tuple[float, float] = (0.0, 1.0)
+    image: itk.Image | np.ndarray,
+    input_value_range: Tuple[float, float] | None = (-1024, 3071),
+    output_value_range: Tuple[float, float] | None = (0.0, 1.0),
+    image_spacing: Tuple[float, float, float] | None = None,
 ) -> itk.Image:
     """Prepares a given image for RTK (e.g. for forward projection) by
     transforming it into IEC 61217 coordinate system. The passed image has to
@@ -25,21 +30,29 @@ def prepare_image_for_rtk(
     :return:
     :rtype:
     """
-    image = image.astype(np.float32)
-    image_spacing = list(image.GetSpacing())
+    if isinstance(image, np.ndarray):
+        if not image_spacing:
+            raise RuntimeError("Please pass image_spacing")
+        image_arr = np.asarray(image, dtype=np.float32)
+    else:
+        image = image.astype(np.float32)
+        image_spacing = image.GetSpacing()
 
-    # preprocess image
-    image_arr = itk.array_from_image(image)
-    image_arr = rescale_range(
-        image_arr, input_range=(-1024, 3071), output_range=output_value_range
-    )
+        # preprocess image
+        image_arr = itk.array_from_image(image)
+        # prepare axes
+        image_arr = np.swapaxes(image_arr, 0, 2)  # ITK to numpy conversion
 
-    # prepare axes
-    image_arr = np.swapaxes(image_arr, 0, 2)  # ITK to numpy conversion
+    if input_value_range and output_value_range:
+        image_arr = rescale_range(
+            image_arr, input_range=input_value_range, output_range=output_value_range
+        )
+
     # CT axes (RAI orientation): x: R-L, y: A-P, z: I-S
     # RTK axes (IEC 61217)       x: R-L, y: I-S, z: P-A
     # swap y and z, then reverse z
     image_arr = np.swapaxes(image_arr, 1, 2)
+    image_spacing = list(image_spacing)
     image_spacing[1], image_spacing[2] = image_spacing[2], image_spacing[1]
     image_arr = image_arr[..., ::-1]
 
@@ -180,25 +193,3 @@ def save_geometry(
     writer.SetFilename(str(output_filepath))
     writer.SetObject(geometry)
     writer.WriteFile()
-
-
-if __name__ == "__main__":
-    image = itk.imread("/datalake/4d_cbct_mc/CatPhantom/scan_2/catphan.mha")
-
-    n_projections = 10
-    geometry = create_geometry(start_angle=0, n_projections=10)
-
-    image = prepare_image_for_rtk(image)
-    forward_projection = project_forward(image, geometry=geometry)
-    itk.imwrite(
-        forward_projection, "/datalake/4d_cbct_mc/CatPhantom/scan_2/catphan_fp.mha"
-    )
-
-    import matplotlib.pyplot as plt
-
-    out = itk.GetArrayFromImage(forward_projection)
-    out = np.swapaxes(out, 0, 2)
-
-    fig, ax = plt.subplots(1, n_projections)
-    for i in range(n_projections):
-        ax[i].imshow(out[..., i])
