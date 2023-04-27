@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
-import time
 from pathlib import Path
 from typing import Sequence, Tuple
 
 import pkg_resources
+import SimpleITK as sitk
 from ipmi.common.logger import tqdm
 from jinja2 import Environment, FileSystemLoader
 
@@ -14,13 +15,20 @@ from cbctmc.common_types import PathLike
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.docker import execute_in_docker
 from cbctmc.mc.dataio import save_text_file
-from cbctmc.mc.geometry import MCGeometry
+from cbctmc.mc.geometry import MCAirGeometry, MCGeometry
+from cbctmc.mc.projection import (
+    MCProjection,
+    get_projections_from_folder,
+    projections_to_itk,
+)
 from cbctmc.mc.utils import replace_root
 
 logger = logging.getLogger(__name__)
 
 
 class MCSimulation:
+    _AIR_SIMULATION_FOLDER = "air"
+
     def __init__(
         self,
         geometry: MCGeometry,
@@ -53,10 +61,28 @@ class MCSimulation:
         self.source_to_isocenter_distance = source_to_isocenter_distance
         self.random_seed = random_seed
 
-    def run(self, output_folder: PathLike):
+    def run_air_simulation(self, output_folder: PathLike):
+        logger.info("Run air simulation")
+        output_folder = Path(output_folder) / MCSimulation._AIR_SIMULATION_FOLDER
+        air_geometry = MCAirGeometry()
+        simulation = MCSimulation(
+            geometry=air_geometry, n_histories=int(2.4e10), n_projections=1
+        )
+        simulation.run_simulation(output_folder, run_air_simulation=False)
+
+    def run_simulation(
+        self,
+        output_folder: PathLike,
+        run_air_simulation: bool = True,
+        clean: bool = True,
+    ):
         output_folder = Path(output_folder)
+
         if not output_folder.is_dir():
             output_folder.mkdir(parents=True)
+
+        if run_air_simulation:
+            self.run_air_simulation(output_folder)
 
         input_filepath = output_folder / "input.in"
         geometry_filepath = output_folder / "geometry.vox.gz"
@@ -70,22 +96,23 @@ class MCSimulation:
             image_size[2] / 2,
         )
 
-        # here we append "/host" to all paths for running MC-GPU with docker
-        output_folder = replace_root(output_folder, new_root="/host")
-        geometry_filepath = replace_root(geometry_filepath, new_root="/host")
-        xray_spectrum_filepath = replace_root(
+        # here we prepend "/host" to all paths for running MC-GPU with docker
+        docker_input_filepath = replace_root(input_filepath, new_root="/host")
+        docker_output_folder = replace_root(output_folder, new_root="/host")
+        docker_geometry_filepath = replace_root(geometry_filepath, new_root="/host")
+        docker_xray_spectrum_filepath = replace_root(
             self.xray_spectrum_filepath, new_root="/host"
         )
-        material_filepaths = [
+        docker_material_filepaths = [
             replace_root(m, new_root="/host") for m in self.material_filepaths
         ]
 
         mcgpu_input = MCSimulation.create_mcgpu_input(
-            voxel_geometry_filepath=geometry_filepath,
-            material_filepaths=material_filepaths,
-            xray_spectrum_filepath=xray_spectrum_filepath,
+            voxel_geometry_filepath=docker_geometry_filepath,
+            material_filepaths=docker_material_filepaths,
+            xray_spectrum_filepath=docker_xray_spectrum_filepath,
             source_position=source_position,
-            output_folder=output_folder,
+            output_folder=docker_output_folder,
             n_histories=self.n_histories,
             n_projections=self.n_projections,
             angle_between_projections=self.angle_between_projections,
@@ -99,7 +126,6 @@ class MCSimulation:
         )
 
         MCSimulation.save_mcgpu_input(mcgpu_input, output_filepath=input_filepath)
-        input_filepath = replace_root(input_filepath, new_root="/host")
 
         i_projection = 0
         container = None
@@ -111,32 +137,70 @@ class MCSimulation:
                 logger=logger,
             )
             container = execute_in_docker(
-                cli_command=["MC-GPU_v1.3.x", str(input_filepath)]
+                cli_command=[
+                    "MC-GPU_v1.3.x",
+                    str(docker_input_filepath),
+                    # "|&",
+                    # "tee",
+                    # str(docker_output_folder / "log.txt"),
+                ]
             )
 
             pattern = re.compile(
                 r"Simulating Projection "
                 r"(?P<i_projection>\d{1,4}) of (?P<n_projections>\d{1,4})"
             )
-            while container.status == "created":
-                for line in container.logs().decode().split("\n\n\n\n")[::-1]:
-                    line = line.strip()
-                    if match := pattern.search(line):
-                        _i_projection = int(match.groupdict()["i_projection"])
-                        if _i_projection > i_projection:
-                            diff = _i_projection - i_projection
-                            progress_bar.update(diff)
-                            i_projection = _i_projection
 
-                        break
+            for log_line in container.logs(stream=True):
+                log_line = log_line.decode().strip()
+                if match := pattern.search(log_line):
+                    _i_projection = int(match.groupdict()["i_projection"])
+                    if _i_projection > i_projection:
+                        diff = _i_projection - i_projection
+                        progress_bar.update(diff)
+                        i_projection = _i_projection
 
-                time.sleep(1.0)
+            # simulation finished
+            self.postprocess_simulation(
+                output_folder, clean=clean, air_normalization=run_air_simulation
+            )
+
         except KeyboardInterrupt:
             # stopping detached container
             if container:
                 logger.info("Stopping Docker container")
                 container.stop()
                 logger.info("Docker container stopped")
+
+    def postprocess_simulation(
+        self, folder: PathLike, clean: bool = True, air_normalization: bool = True
+    ):
+        folder = Path(folder)
+        projections = get_projections_from_folder(folder)
+        projections_itk = projections_to_itk(projections)
+        sitk.WriteImage(projections_itk, str(folder / "projections.mha"))
+
+        if air_normalization:
+            air_projection = MCProjection.from_file(
+                folder / MCSimulation._AIR_SIMULATION_FOLDER / "projection"
+            )
+            projections_itk = projections_to_itk(
+                projections, air_projection=air_projection
+            )
+            sitk.WriteImage(projections_itk, str(folder / "projections_normalized.mha"))
+
+        if clean:
+            # clean foder
+            MCSimulation._clean_simulation_folder(folder)
+
+    @staticmethod
+    def _clean_simulation_folder(folder: PathLike):
+        folder = Path(folder)
+        # delete projection and projection.raw
+        pattern = re.compile(r"^projection(_\d{4})?(\.raw)?$")
+        for filepath in folder.glob("*"):
+            if pattern.match(filepath.name):
+                os.remove(filepath)
 
     @staticmethod
     def create_mcgpu_input(

@@ -26,7 +26,7 @@ def save_text_file(
 
     message = f"Saved file to {output_filepath!s}"
     if content_type:
-        message = f" {message} ({content_type})"
+        message = f"{message} ({content_type})"
     logger.info(message)
 
     return output_filepath
