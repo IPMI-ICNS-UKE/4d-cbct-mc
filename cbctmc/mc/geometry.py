@@ -14,10 +14,11 @@ import pkg_resources
 import SimpleITK as sitk
 from jinja2 import Environment, FileSystemLoader
 
-from cbctmc.common_types import PathLike
+from cbctmc.common_types import FloatTuple3D, PathLike
 from cbctmc.mc.dataio import save_text_file
 from cbctmc.mc.materials import MATERIALS_125KEV, Material
 from cbctmc.mc.voxel_data import compile_voxel_data_string
+from cbctmc.utils import resample_image_spacing
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class BaseMaterialMapper(ABC):
         densities_output: np.ndarray | None = None,
     ):
         mask = segmentation > 0
+
         if materials_output is None:
             materials = np.zeros_like(segmentation, dtype=np.uint8)
             densities = np.zeros_like(segmentation, dtype=np.float32)
@@ -212,7 +214,9 @@ class FatMaterialMapper(SingleMaterialMapper):
 class MaterialMapperPipeline(
     UserList[Tuple[BaseMaterialMapper, Union[np.ndarray, PathLike, None]]]
 ):
-    def execute(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def execute(
+        self, image: np.ndarray, image_spacing: FloatTuple3D | None = None
+    ) -> Tuple[np.ndarray, np.ndarray]:
         materials = None
         densities = None
         for mapper, segmentation in self:
@@ -224,6 +228,13 @@ class MaterialMapperPipeline(
             if not isinstance(segmentation, np.ndarray):
                 # load segmentation from file and convert to numpy array
                 segmentation = sitk.ReadImage(str(segmentation))
+                if image_spacing:
+                    segmentation = resample_image_spacing(
+                        segmentation,
+                        new_spacing=image_spacing,
+                        resampler=sitk.sitkNearestNeighbor,
+                        default_voxel_value=0,
+                    )
                 # convert to numpy, swap zyx (itk) -> xyz (numpy)
                 segmentation = sitk.GetArrayFromImage(segmentation).swapaxes(0, 2)
                 segmentation = np.asarray(segmentation, dtype=np.uint8)
@@ -270,10 +281,14 @@ class MCGeometry:
         materials: np.ndarray,
         densities: np.ndarray,
         image_spacing: Tuple[float, float, float],
+        image_direction: Tuple[float, ...] | None = None,
+        image_origin: Tuple[float, float, float] | None = None,
     ):
         self.materials = materials
         self.densities = densities
         self.image_spacing = image_spacing
+        self.image_direction = image_direction
+        self.image_origin = image_origin
 
     @property
     def image_shape(self) -> Tuple[int, int, int]:
@@ -296,6 +311,9 @@ class MCGeometry:
         return instance
 
     def save_mcgpu_geometry(self, filepath: PathLike, compress: bool = True):
+        if not (self.densities > 0.0).all():
+            raise ValueError("Density can not be zero or negative")
+
         contents = MCGeometry.create_mcgpu_geometry(
             materials=self.materials,
             densities=self.densities,
@@ -309,6 +327,24 @@ class MCGeometry:
             content_type="MC-GPU geometry file",
         )
 
+    def _array_to_itk(self, array: np.ndarray) -> sitk.Image:
+        array = sitk.GetImageFromArray(array.swapaxes(0, 2))
+        array.SetSpacing(self.image_spacing)
+        if self.image_origin:
+            array.SetOrigin(self.image_origin)
+        if self.image_direction:
+            array.SetDirection(self.image_direction)
+
+        return array
+
+    def save_material_segmentation(self, filepath: PathLike):
+        materials = self._array_to_itk(self.materials)
+        sitk.WriteImage(materials, str(filepath))
+
+    def save_density_image(self, filepath: PathLike):
+        densities = self._array_to_itk(self.densities)
+        sitk.WriteImage(densities, str(filepath))
+
     @classmethod
     def from_image(
         cls,
@@ -321,9 +357,20 @@ class MCGeometry:
         stomach_segmentation_filepath: PathLike | None = None,
         lung_segmentation_filepath: PathLike | None = None,
         lung_vessel_segmentation_filepath: PathLike | None = None,
+        image_spacing: FloatTuple3D | None = None,
     ) -> MCGeometry:
         image = sitk.ReadImage(str(image_filepath))
+        if image_spacing:
+            image = resample_image_spacing(
+                image,
+                new_spacing=image_spacing,
+                resampler=sitk.sitkLinear,
+                default_voxel_value=-1000,
+            )
+
         image_spacing = image.GetSpacing()
+        image_origin = image.GetOrigin()
+        image_direction = image.GetDirection()
         # convert to numpy, swap zyx (itk) -> xyz (numpy)
         image = sitk.GetArrayFromImage(image).swapaxes(0, 2)
 
@@ -338,10 +385,16 @@ class MCGeometry:
             lung_vessel_segmentation=lung_vessel_segmentation_filepath,
         )
 
-        materials, densities = mapper_pipeline.execute(image)
+        materials, densities = mapper_pipeline.execute(
+            image, image_spacing=image_spacing
+        )
 
         return cls(
-            materials=materials, densities=densities, image_spacing=image_spacing
+            materials=materials,
+            densities=densities,
+            image_spacing=image_spacing,
+            image_direction=image_direction,
+            image_origin=image_origin,
         )
 
     @staticmethod
@@ -389,7 +442,7 @@ class MCGeometry:
 
 class MCAirGeometry(MCGeometry):
     def __init__(
-        self, image_spacing: Tuple[float, float, float] = (1500.0, 1500.0, 1500.0)
+        self, image_spacing: Tuple[float, float, float] = (2000.0, 2000.0, 2000.0)
     ):
         air_material = MATERIALS_125KEV["air"]
 

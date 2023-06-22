@@ -1,23 +1,29 @@
-from torch.utils.data import Sampler
-from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
+import warnings
+from typing import Sized
+
 import numpy as np
 from numpy.random import default_rng
-import warnings
 from sklearn.utils import shuffle
+from torch.utils.data import Sampler
 
 
 class MCSampler(Sampler):
     data_source: Sized
     runs: int
+
     def __init__(self, data_source: Sized, runs: int) -> None:
         self.data_source = data_source
         self.runs = runs
 
     def __iter__(self):
-        i = len(self.data_source)/self.runs
+        i = len(self.data_source) / self.runs
         i = np.random.randint(0, i)
         rng = default_rng()
-        numbers = rng.choice(np.arange(i*self.runs, (i+1)*self.runs, 1), size=self.runs, replace=False)
+        numbers = rng.choice(
+            np.arange(i * self.runs, (i + 1) * self.runs, 1),
+            size=self.runs,
+            replace=False,
+        )
         numbers = numbers.astype("int")
         return iter(numbers)
 
@@ -26,23 +32,23 @@ class MCSampler(Sampler):
 
 
 class GroupedSampler(Sampler):
-    """
-    Samples mini-batches randomly but in a grouped manner.
+    """Samples mini-batches randomly but in a grouped manner.
 
-    This means that the items from the different groups are always sampled together.
-    This is an abstract class. Implement the :py:meth:`~get_groups` method which creates groups to be sampled from.
+    This means that the items from the different groups are always
+    sampled together. This is an abstract class. Implement the
+    :py:meth:`~get_groups` method which creates groups to be sampled
+    from.
     """
 
     def __init__(
         self,
         data_source,
-        runs: int  = 15,
+        runs: int = 15,
         batch_size: int = 64,
         shuffle: bool = False,
         drop_last: bool = False,
     ):
-        """
-        Initialize.
+        """Initialize.
 
         Args:
             data_source (TimeSeriesDataSet): timeseries dataset.
@@ -56,12 +62,20 @@ class GroupedSampler(Sampler):
         # Since collections.abc.Iterable does not check for `__getitem__`, which
         # is one way for an object to be an iterable, we don't do an `isinstance`
         # check here.
-        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size <= 0:
+        if (
+            not isinstance(batch_size, int)
+            or isinstance(batch_size, bool)
+            or batch_size <= 0
+        ):
             raise ValueError(
-                "batch_size should be a positive integer value, " "but got batch_size={}".format(batch_size)
+                "batch_size should be a positive integer value, "
+                "but got batch_size={}".format(batch_size)
             )
         if not isinstance(drop_last, bool):
-            raise ValueError("drop_last should be a boolean value, but got " "drop_last={}".format(drop_last))
+            raise ValueError(
+                "drop_last should be a boolean value, but got "
+                "drop_last={}".format(drop_last)
+            )
         self.data_source = data_source
         self.batch_size = batch_size
         self.drop_last = drop_last
@@ -72,8 +86,7 @@ class GroupedSampler(Sampler):
         self.construct_batch_groups(groups)
 
     def get_groups(self, data_source):
-        """
-        Create the groups which can be sampled.
+        """Create the groups which can be sampled.
 
         Args:
             data_source (TimeSeriesDataSet): timeseries dataset.
@@ -82,15 +95,14 @@ class GroupedSampler(Sampler):
             dict-like: dictionary-like object with data_source.index as values and group names as keys
         """
         groups = {}
-        for key in range(int(len(data_source)/self.runs)):
-            groups[key] = np.arange(key*self.runs, (key+1)*self.runs, 1).astype("int")
+        for key in range(int(len(data_source) / self.runs)):
+            groups[key] = np.arange(key * self.runs, (key + 1) * self.runs, 1).astype(
+                "int"
+            )
         return groups
 
-
     def construct_batch_groups(self, groups):
-        """
-        Construct index of batches from which can be sampled
-        """
+        """Construct index of batches from which can be sampled."""
         self._groups = groups
         # calculate sizes of groups
         self._group_sizes = {}
@@ -99,7 +111,9 @@ class GroupedSampler(Sampler):
             if self.drop_last:
                 self._group_sizes[name] = len(group) // self.batch_size
             else:
-                self._group_sizes[name] = (len(group) + self.batch_size - 1) // self.batch_size
+                self._group_sizes[name] = (
+                    len(group) + self.batch_size - 1
+                ) // self.batch_size
             if self._group_sizes[name] == 0:
                 self._group_sizes[name] = 1
                 warns.append(name)
@@ -111,10 +125,13 @@ class GroupedSampler(Sampler):
             )
         # create index from which can be sampled: index is equal to number of batches
         # associate index with prediction time
-        self._group_index = np.repeat(list(self._group_sizes.keys()), list(self._group_sizes.values()))
+        self._group_index = np.repeat(
+            list(self._group_sizes.keys()), list(self._group_sizes.values())
+        )
         # associate index with batch within prediction time group
-        self._sub_group_index = np.concatenate([np.arange(size) for size in self._group_sizes.values()])
-
+        self._sub_group_index = np.concatenate(
+            [np.arange(size) for size in self._group_sizes.values()]
+        )
 
     def __iter__(self):
         if self.shuffle:  # shuffle samples

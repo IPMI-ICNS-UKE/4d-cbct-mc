@@ -54,20 +54,22 @@ def prepare_image_for_rtk(
     image_arr = np.swapaxes(image_arr, 1, 2)
     image_spacing = list(image_spacing)
     image_spacing[1], image_spacing[2] = image_spacing[2], image_spacing[1]
-    image_arr = image_arr[..., ::-1]
+
+    image_arr = image_arr[:, ::-1, :]
 
     # transform back to ITK image
-    image_arr = np.swapaxes(image_arr, 0, 2)  # numpy to ITK conversion
+    # image_arr = np.swapaxes(image_arr, 0, 2)  # numpy to ITK conversion
     # copy is needed here for right orientation
     image = itk.image_from_array(image_arr.copy())
     image.SetSpacing(image_spacing)
 
-    image.SetOrigin(
-        [
-            -0.5 * n_voxels * voxel_size
-            for (n_voxels, voxel_size) in zip(image.shape, image.GetSpacing())
-        ]
-    )
+    voxel_size = image.GetSpacing()
+    origin = [
+        -0.5 * n_voxels * voxel_size
+        for (n_voxels, voxel_size) in zip(image.shape, voxel_size)
+    ]
+
+    image.SetOrigin(origin)
 
     return image
 

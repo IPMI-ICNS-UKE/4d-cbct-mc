@@ -70,13 +70,30 @@ class MCSimulation:
         )
         simulation.run_simulation(output_folder, run_air_simulation=False)
 
+    def _already_simulated(self, output_folder: PathLike) -> bool:
+        output_folder = Path(output_folder)
+        # simply check if simulation output_folder is not empty
+        return output_folder.is_dir() and any(output_folder.iterdir())
+
     def run_simulation(
         self,
         output_folder: PathLike,
         run_air_simulation: bool = True,
         clean: bool = True,
+        gpu_id: int = 0,
+        force_rerun: bool = False,
+        force_geometry_recompile: bool = False,
+        source_position_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+        source_to_detector_distance_offset: float = 0.0,
+        source_to_isocenter_distance_offset: float = 0.0,
     ):
         output_folder = Path(output_folder)
+
+        if self._already_simulated(output_folder) and not force_rerun:
+            logger.info(
+                f"Output folder {output_folder} is not empty, skipping simulation"
+            )
+            return
 
         if not output_folder.is_dir():
             output_folder.mkdir(parents=True)
@@ -86,14 +103,19 @@ class MCSimulation:
 
         input_filepath = output_folder / "input.in"
         geometry_filepath = output_folder / "geometry.vox.gz"
-        self.geometry.save_mcgpu_geometry(geometry_filepath)
+
+        if not geometry_filepath.exists() or force_geometry_recompile:
+            # TODO: check via hash
+            self.geometry.save_mcgpu_geometry(geometry_filepath)
 
         image_size = self.geometry.image_size
 
         source_position = (
-            image_size[0] / 2,
-            image_size[1] / 2 - self.source_to_isocenter_distance,
-            image_size[2] / 2,
+            image_size[0] / 2 + source_position_offset[0],
+            image_size[1] / 2
+            - self.source_to_isocenter_distance
+            + source_position_offset[1],
+            image_size[2] / 2 + source_position_offset[2],
         )
 
         # here we prepend "/host" to all paths for running MC-GPU with docker
@@ -120,8 +142,10 @@ class MCSimulation:
             source_aperture=self.source_aperture,
             n_detector_pixels=self.n_detector_pixels,
             detector_size=self.detector_size,
-            source_to_detector_distance=self.source_to_detector_distance,
-            source_to_isocenter_distance=self.source_to_isocenter_distance,
+            source_to_detector_distance=self.source_to_detector_distance
+            + source_to_detector_distance_offset,
+            source_to_isocenter_distance=self.source_to_isocenter_distance
+            + source_to_isocenter_distance_offset,
             random_seed=self.random_seed,
         )
 
@@ -143,27 +167,35 @@ class MCSimulation:
                     # "|&",
                     # "tee",
                     # str(docker_output_folder / "log.txt"),
-                ]
+                ],
+                gpus=(gpu_id,),
             )
 
-            pattern = re.compile(
+            progress_pattern = re.compile(
                 r"Simulating Projection "
                 r"(?P<i_projection>\d{1,4}) of (?P<n_projections>\d{1,4})"
             )
+            error_pattern = re.compile(r"(?i)error")
+            with open(output_folder / "run.log", "wt") as f:
+                for log_line in container.logs(stream=True):
+                    log_line = log_line.decode()
+                    f.write(log_line)
+                    log_line = log_line.strip()
 
-            for log_line in container.logs(stream=True):
-                log_line = log_line.decode().strip()
-                if match := pattern.search(log_line):
-                    _i_projection = int(match.groupdict()["i_projection"])
-                    if _i_projection > i_projection:
-                        diff = _i_projection - i_projection
-                        progress_bar.update(diff)
-                        i_projection = _i_projection
+                    # check for simulation progress
+                    if match := progress_pattern.search(log_line):
+                        _i_projection = int(match.groupdict()["i_projection"])
+                        if _i_projection > i_projection:
+                            diff = _i_projection - i_projection
+                            progress_bar.update(diff)
+                            i_projection = _i_projection
 
-            # simulation finished
-            self.postprocess_simulation(
-                output_folder, clean=clean, air_normalization=run_air_simulation
-            )
+                    # check for errors
+                    if error_pattern.search(log_line):
+                        logger.error(
+                            f"An error occurred while executing the MC simulation. "
+                            f"Please check the run.log file: {log_line}"
+                        )
 
         except KeyboardInterrupt:
             # stopping detached container
@@ -172,22 +204,39 @@ class MCSimulation:
                 container.stop()
                 logger.info("Docker container stopped")
 
+        # simulation finished or stopped
+        self.postprocess_simulation(
+            output_folder, clean=clean, air_normalization=run_air_simulation
+        )
+
     def postprocess_simulation(
         self, folder: PathLike, clean: bool = True, air_normalization: bool = True
     ):
         folder = Path(folder)
         projections = get_projections_from_folder(folder)
-        projections_itk = projections_to_itk(projections)
-        sitk.WriteImage(projections_itk, str(folder / "projections.mha"))
+
+        if not projections:
+            # nothing to postprocess
+            return
+
+        for mode in ("total", "unscattered", "scattered"):
+            projections_itk = projections_to_itk(projections, mode=mode)
+            output_filepath = folder / f"projections_{mode}.mha"
+            logger.info(f"Write projection stack {output_filepath}")
+            sitk.WriteImage(projections_itk, str(output_filepath))
 
         if air_normalization:
             air_projection = MCProjection.from_file(
-                folder / MCSimulation._AIR_SIMULATION_FOLDER / "projection"
+                folder / MCSimulation._AIR_SIMULATION_FOLDER / "projections_total.mha"
             )
             projections_itk = projections_to_itk(
-                projections, air_projection=air_projection
+                projections,
+                air_projection=air_projection,
+                mode="total",
             )
-            sitk.WriteImage(projections_itk, str(folder / "projections_normalized.mha"))
+            output_filepath = folder / "projections_total_normalized.mha"
+            logger.info(f"Write projection stack {output_filepath}")
+            sitk.WriteImage(projections_itk, str(output_filepath))
 
         if clean:
             # clean foder
@@ -225,8 +274,8 @@ class MCSimulation:
         # Note: MC-GPU uses cm instead of mm (thus dividing by 10)
         params = {
             "angle_between_projections": angle_between_projections,
-            "detector_size_x": round(detector_size[0] / 10.0, 3),
-            "detector_size_y": round(detector_size[1] / 10.0, 3),
+            "detector_size_x": round(detector_size[0] / 10.0, 6),
+            "detector_size_y": round(detector_size[1] / 10.0, 6),
             "material_filepaths": [str(path) for path in material_filepaths],
             "n_detector_pixels_x": n_detector_pixels[0],
             "n_detector_pixels_y": n_detector_pixels[1],
@@ -239,12 +288,12 @@ class MCSimulation:
             "source_direction_cosine_u": source_direction_cosines[0],
             "source_direction_cosine_v": source_direction_cosines[1],
             "source_direction_cosine_w": source_direction_cosines[2],
-            "source_position_x": round(source_position[0] / 10.0, 3),
-            "source_position_y": round(source_position[1] / 10.0, 3),
-            "source_position_z": round(source_position[2] / 10.0, 3),
-            "source_to_detector_distance": round(source_to_detector_distance / 10.0, 3),
+            "source_position_x": round(source_position[0] / 10.0, 6),
+            "source_position_y": round(source_position[1] / 10.0, 6),
+            "source_position_z": round(source_position[2] / 10.0, 6),
+            "source_to_detector_distance": round(source_to_detector_distance / 10.0, 6),
             "source_to_isocenter_distance": round(
-                source_to_isocenter_distance / 10.0, 3
+                source_to_isocenter_distance / 10.0, 6
             ),
             "voxel_geometry_filepath": str(voxel_geometry_filepath),
             "xray_spectrum_filepath": str(xray_spectrum_filepath),

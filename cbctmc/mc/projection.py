@@ -5,7 +5,7 @@ import multiprocessing
 import re
 from functools import partial
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import List, Literal, Sequence, Tuple
 
 import numpy as np
 import SimpleITK as sitk
@@ -22,6 +22,45 @@ class MCProjection:
         self._data = data
         self.detector_pixel_size = detector_pixel_size
 
+        # TODO: check all zero
+
+    @staticmethod
+    def _read_itk(filepath: PathLike) -> np.ndarray:
+        data = sitk.ReadImage(str(filepath))
+        data = sitk.GetArrayFromImage(data)
+        data = data.squeeze(axis=0)
+
+        return data
+
+    @staticmethod
+    def _read_raw(
+        filepath: PathLike,
+        n_detector_pixels: Tuple[int, int],
+        n_detector_pixels_half_fan: Tuple[int, int],
+    ) -> np.ndarray:
+        data = np.loadtxt(filepath, dtype=np.float64)
+        data = data.astype(np.float32)
+
+        data = data.reshape(*n_detector_pixels[::-1], 4)
+        data = np.flip(data, axis=0)
+
+        data = data[:, : n_detector_pixels_half_fan[0]]
+
+        return data
+
+    @staticmethod
+    def _is_itk_image(filepath: PathLike) -> bool:
+        itk_suffixes = (
+            ".mha",
+            ".nii",
+        )
+        filepath = Path(filepath)
+        for suffix in filepath.suffixes:
+            if suffix in itk_suffixes:
+                return True
+
+        return False
+
     @classmethod
     def from_file(
         cls,
@@ -33,15 +72,17 @@ class MCProjection:
         detector_pixel_size: Tuple[float, float] = (0.776, 0.776),
     ) -> "MCProjection":
         logger.info(f"Load projection {filepath}")
-        projection = np.loadtxt(filepath, dtype=np.float64)
-        projection = projection.astype(np.float32)
 
-        projection = projection.reshape(*n_detector_pixels[::-1], 4)
-        projection = np.flip(projection, axis=0)
+        if MCProjection._is_itk_image(filepath):
+            data = MCProjection._read_itk(filepath)
+        else:
+            data = MCProjection._read_raw(
+                filepath,
+                n_detector_pixels=n_detector_pixels,
+                n_detector_pixels_half_fan=n_detector_pixels_half_fan,
+            )
 
-        projection = projection[:, : n_detector_pixels_half_fan[0]]
-
-        return cls(data=projection, detector_pixel_size=detector_pixel_size)
+        return cls(data=data, detector_pixel_size=detector_pixel_size)
 
     def __getitem__(self, item):
         return self._data[item]
@@ -56,38 +97,56 @@ def projections_to_numpy(projections: Sequence[MCProjection]) -> np.ndarray:
     return projections
 
 
+def normalize_projections(
+    projections: np.ndarray, air_projection: np.ndarray, clip_to_air: bool = False
+) -> np.ndarray:
+    if clip_to_air:
+        # clip  max of projections to air projection
+        projections = np.where(
+            projections > air_projection, air_projection, projections
+        )
+    # normalize projections according to Beer–Lambert law
+    projections = np.log(air_projection / projections)
+
+    return projections
+
+
 def projections_to_itk(
-    projections: Sequence[MCProjection], air_projection: MCProjection | None = None
+    projections: Sequence[MCProjection],
+    air_projection: MCProjection | None = None,
+    mode: Literal["total", "unscattered", "scattered"] = "total",
 ):
     detector_pixel_size = projections[0].detector_pixel_size
 
-    has_air_projection = air_projection is not None
+    do_air_normalization = air_projection is not None and mode == "total"
     projections = projections_to_numpy(projections)
-    # sum over all photons (non-scattered and scattered)
+
     if projections.ndim == 4:
-        projections = projections.sum(axis=-1)
+        if mode == "total":
+            projections = projections.sum(axis=-1)
+        elif mode == "unscattered":
+            projections = projections[..., 0]
+        elif mode == "scattered":
+            projections = projections[..., 1:].sum(axis=-1)
 
     min_non_zero = projections[projections > 0.0].min()
 
     projections = np.where(projections == 0, min_non_zero, projections)
-    if has_air_projection:
+    if do_air_normalization:
         air_projection = np.asarray(air_projection)
         if air_projection.ndim == 3:
             air_projection = air_projection.sum(-1)
 
-        projections = np.where(
-            projections > air_projection, air_projection, projections
-        )
         # normalize projections according to Beer–Lambert law
-        projections = np.log(air_projection / projections)
+        projections = normalize_projections(projections, air_projection)
 
     projections = sitk.GetImageFromArray(projections)
     projections.SetSpacing((detector_pixel_size[0], detector_pixel_size[1], 1))
     projections.SetOrigin(
         (
-            int(-projections.GetSize()[0] * projections.GetSpacing()[0] / 2),
-            int(-projections.GetSize()[1] * projections.GetSpacing()[1] / 2),
-            1,
+            -projections.GetSize()[0] * projections.GetSpacing()[0] / 2,
+            -projections.GetSize()[1] * projections.GetSpacing()[1] / 2,
+            0,
         )
     )
 
@@ -102,7 +161,6 @@ def get_projections_from_folder(
     detector_pixel_size: Tuple[float, float] = (0.776, 0.776),
 ) -> List[MCProjection]:
     folder = Path(folder)
-    projections = []
 
     projection_filepaths = [
         p for p in sorted(folder.glob("*")) if re.match(regex_pattern, p.name)

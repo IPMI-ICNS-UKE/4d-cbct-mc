@@ -1,5 +1,7 @@
-from typing import Union, Tuple
+from typing import Optional, Tuple, Type, Union
+
 import torch
+import torch.functional as F
 import torch.nn as nn
 
 
@@ -144,3 +146,189 @@ class ResidualDenseBlock2D(nn.Module):
         x_out = x + x_out
 
         return x_out
+
+
+class EncoderBlock(nn.Module):
+    def __init__(
+        self,
+        convolution_layer: Type[nn.Module],
+        downsampling_layer: Type[nn.Module],
+        norm_layer: Type[nn.Module],
+        in_channels,
+        out_channels,
+        n_convolutions: int = 1,
+        convolution_kwargs: Optional[dict] = None,
+        downsampling_kwargs: Optional[dict] = None,
+    ):
+        super().__init__()
+
+        if not convolution_kwargs:
+            convolution_kwargs = {}
+        if not downsampling_kwargs:
+            downsampling_kwargs = {}
+
+        self.down = downsampling_layer(**downsampling_kwargs)
+
+        layers = []
+        for i_conv in range(n_convolutions):
+            layers.append(
+                convolution_layer(
+                    in_channels=in_channels if i_conv == 0 else out_channels,
+                    out_channels=out_channels,
+                    **convolution_kwargs,
+                )
+            )
+            if norm_layer:
+                layers.append(norm_layer(out_channels))
+            layers.append(nn.LeakyReLU(inplace=True))
+        self.convs = nn.Sequential(*layers)
+
+    def forward(self, *inputs):
+        x = self.down(*inputs)
+        return self.convs(x)
+
+
+class DecoderBlock(nn.Module):
+    def __init__(
+        self,
+        convolution_layer: Type[nn.Module],
+        upsampling_layer: Type[nn.Module],
+        norm_layer: Type[nn.Module],
+        in_channels,
+        out_channels,
+        n_convolutions: int = 1,
+        convolution_kwargs: Optional[dict] = None,
+        upsampling_kwargs: Optional[dict] = None,
+    ):
+        super().__init__()
+
+        if not convolution_kwargs:
+            convolution_kwargs = {}
+        if not upsampling_kwargs:
+            upsampling_kwargs = {}
+
+        self.up = upsampling_layer(**upsampling_kwargs)
+
+        layers = []
+        for i_conv in range(n_convolutions):
+            layers.append(
+                convolution_layer(
+                    in_channels=in_channels if i_conv == 0 else out_channels,
+                    out_channels=out_channels,
+                    **convolution_kwargs,
+                )
+            )
+            if norm_layer:
+                layers.append(norm_layer(out_channels))
+            layers.append(nn.LeakyReLU(inplace=True))
+        self.convs = nn.Sequential(*layers)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        if x2 is not None:
+            x = torch.cat([x2, x1], dim=1)
+        else:
+            x = x1
+        x = self.convs(x)
+        return x
+
+
+class ConvBlock(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        mid_channels: int = None,
+        dimensions: int = 2,
+        norm_type: Optional[str] = "BatchNorm",
+    ):
+        super().__init__()
+
+        if not mid_channels:
+            mid_channels = out_channels
+
+        conv = getattr(nn, f"Conv{dimensions}d")
+        if norm_type:
+            norm = getattr(nn, f"{norm_type}{dimensions}d")
+            layers = [
+                conv(in_channels, mid_channels, kernel_size=3, padding=1),
+                norm(mid_channels),
+                nn.ReLU(inplace=True),
+                conv(mid_channels, out_channels, kernel_size=3, padding=1),
+                norm(out_channels),
+                nn.ReLU(inplace=True),
+            ]
+        else:
+            layers = [
+                conv(in_channels, mid_channels, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True),
+                conv(mid_channels, out_channels, kernel_size=3, padding=1),
+                nn.ReLU(inplace=True),
+            ]
+
+        self.double_conv = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.double_conv(x)
+
+
+class DownBlock(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        dimensions: int = 2,
+        pooling: Union[int, Tuple[int, ...]] = 2,
+        norm_type: Optional[str] = "BatchNorm",
+    ):
+        super().__init__()
+
+        if dimensions == 1:
+            pool = nn.MaxPool1d
+        elif dimensions == 2:
+            pool = nn.MaxPool2d
+        elif dimensions == 3:
+            pool = nn.MaxPool3d
+        else:
+            raise ValueError(f"Cannot handle {dimensions=}")
+
+        self.maxpool_conv = nn.Sequential(
+            pool(pooling),
+            ConvBlock(
+                in_channels, out_channels, dimensions=dimensions, norm_type=norm_type
+            ),
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+
+
+class UpBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
+            self.conv = ConvBlock(in_channels, out_channels, in_channels // 2)
+        else:
+            self.up = nn.ConvTranspose2d(
+                in_channels, in_channels // 2, kernel_size=2, stride=2
+            )
+            self.conv = ConvBlock(in_channels, out_channels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        # input is CHW
+        if x2 is not None:
+            diff_y = x2.size()[2] - x1.size()[2]
+            diff_x = x2.size()[3] - x1.size()[3]
+
+            x1 = F.pad(
+                x1,
+                [diff_x // 2, diff_x - diff_x // 2, diff_y // 2, diff_y - diff_y // 2],
+            )
+            x = torch.cat([x2, x1], dim=1)
+        else:
+            x = x1
+        return self.conv(x)

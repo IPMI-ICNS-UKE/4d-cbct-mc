@@ -279,4 +279,4 @@ poetry.toml
 
 *.npy
 
-sandbox.py
+run_mc_simulations.py
