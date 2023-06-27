@@ -8,7 +8,7 @@ import numpy as np
 import SimpleITK as sitk
 import torch
 
-from cbctmc.common_types import ArrayOrTensor, IntTuple3D
+from cbctmc.common_types import ArrayOrTensor, IntTuple3D, Number
 
 
 def hash_path(path: Path) -> str:
@@ -47,7 +47,10 @@ def iec61217_to_rsp(image):
 
 
 def rescale_range(
-    values: ArrayOrTensor, input_range: Tuple, output_range: Tuple, clip: bool = True
+    values: ArrayOrTensor | Number,
+    input_range: Tuple,
+    output_range: Tuple,
+    clip: bool = True,
 ):
     if input_range and output_range and (input_range != output_range):
         is_tensor = isinstance(values, torch.Tensor)

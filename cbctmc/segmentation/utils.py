@@ -42,10 +42,13 @@ def create_ct_segmentations(
 
 
 def _merge_segmentations(
-    folder: PathLike, glob_patterns: Sequence[str], output_filename: str | None = None
+    folder: PathLike,
+    glob_patterns: Sequence[str],
+    output_filename: str | None = None,
+    overwrite: bool = False,
 ):
     folder = Path(folder)
-    if output_filename and (folder / output_filename).exists():
+    if not overwrite and output_filename and (folder / output_filename).exists():
         return
 
     filepaths = []
@@ -64,7 +67,7 @@ def _merge_segmentations(
 
 
 def merge_upper_body_bone_segmentations(
-    folder: PathLike, save: bool = True
+    folder: PathLike, save: bool = True, overwrite: bool = False
 ) -> sitk.Image:
     glob_patterns = (
         "rib_*",
@@ -79,11 +82,12 @@ def merge_upper_body_bone_segmentations(
         folder=folder,
         glob_patterns=glob_patterns,
         output_filename="upper_body_bones.nii.gz" if save else None,
+        overwrite=overwrite,
     )
 
 
 def merge_rib_body_bone_segmentations(
-    folder: PathLike, save: bool = True
+    folder: PathLike, save: bool = True, overwrite: bool = False
 ) -> sitk.Image:
     glob_patterns = ("rib_*",)
 
@@ -91,34 +95,41 @@ def merge_rib_body_bone_segmentations(
         folder=folder,
         glob_patterns=glob_patterns,
         output_filename="ribs.nii.gz" if save else None,
+        overwrite=overwrite,
     )
 
 
-def merge_upper_body_muscle_segmentations(folder: PathLike, save: bool = True):
-    glob_patterns = ("autochthon_*", "iliopsoas_*" "skeletal_muscle*")
+def merge_upper_body_muscle_segmentations(
+    folder: PathLike, save: bool = True, overwrite: bool = False
+):
+    glob_patterns = ("autochthon_*", "iliopsoas_*", "skeletal_muscle*")
 
     return _merge_segmentations(
         folder=folder,
         glob_patterns=glob_patterns,
         output_filename="upper_body_muscles.nii.gz" if save else None,
+        overwrite=overwrite,
     )
 
 
-def merge_upper_body_fat_segmentations(folder: PathLike, save: bool = True):
+def merge_upper_body_fat_segmentations(
+    folder: PathLike, save: bool = True, overwrite: bool = False
+):
     glob_patterns = ("torso_fat*", "subcutaneous_fat*")
 
     return _merge_segmentations(
         folder=folder,
         glob_patterns=glob_patterns,
         output_filename="upper_body_fat.nii.gz" if save else None,
+        overwrite=overwrite,
     )
 
 
-def merge_upper_body_segmentations(folder: Path, force: bool = False):
+def merge_upper_body_segmentations(folder: Path, overwrite: bool = False):
     logger.info(f"Merging {folder}")
-    merge_upper_body_bone_segmentations(folder)
-    merge_upper_body_muscle_segmentations(folder)
-    merge_upper_body_fat_segmentations(folder)
+    merge_upper_body_bone_segmentations(folder, overwrite=overwrite)
+    merge_upper_body_muscle_segmentations(folder, overwrite=overwrite)
+    merge_upper_body_fat_segmentations(folder, overwrite=overwrite)
 
 
 def merge_segmentations_of_folders(

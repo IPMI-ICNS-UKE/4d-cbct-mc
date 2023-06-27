@@ -22,19 +22,23 @@ class CTSegmentationTrainer(BaseTrainer):
         with torch.autocast(device_type="cuda", enabled=False):
             outputs = self.model(images)
             losses = self.loss_function(outputs, segmentations)
-            loss_per_image = losses.mean(dim=(1, 2, 3, 4))
-            loss = loss_per_image.mean()
-            loss_per_label = losses.mean(dim=(0, 2, 3, 4))
 
-        result = {"loss": loss}
+            result = {}
+            if losses.ndim == 5:
+                loss_per_image = losses.mean(dim=(1, 2, 3, 4))
+                loss = loss_per_image.mean()
+                loss_per_label = losses.mean(dim=(0, 2, 3, 4))
+                loss_per_label = loss_per_label.detach().cpu().numpy().tolist()
+                loss_per_label = {
+                    f"loss_label_{label_name}": loss_per_label[label_index]
+                    for label_index, label_name in labels.items()
+                }
 
-        loss_per_label = loss_per_label.detach().cpu().numpy().tolist()
-        loss_per_label = {
-            f"loss_label_{label_name}": loss_per_label[label_index]
-            for label_index, label_name in labels.items()
-        }
+                result.update(loss_per_label)
+            else:
+                loss = losses.mean()
 
-        result.update(loss_per_label)
+        result["loss"] = loss
 
         if return_prediction:
             return result, outputs

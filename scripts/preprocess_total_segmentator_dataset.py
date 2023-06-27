@@ -1,30 +1,20 @@
 import logging
-import multiprocessing
-from functools import partial
 from pathlib import Path
-from typing import List, Sequence
 
 import numpy as np
 import SimpleITK as sitk
-from ipmi.common.dataio.segmentation import merge_segmentations
+from ipmi.common.logger import init_fancy_logging
 
 from cbctmc.segmentation.utils import (
     _merge_segmentations,
     create_ct_segmentations,
-    merge_rib_body_bone_segmentations,
-    merge_segmentations_of_folders,
-    merge_upper_body_bone_segmentations,
-    merge_upper_body_fat_segmentations,
-    merge_upper_body_muscle_segmentations,
     merge_upper_body_segmentations,
 )
 from cbctmc.utils import get_robust_bounding_box_3d
 
-logger = logging.getLogger(__name__)
-from ipmi.common.logger import init_fancy_logging
-
 init_fancy_logging()
 
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logging.getLogger("ipmi").setLevel(logging.INFO)
 
@@ -40,21 +30,6 @@ LUNG_SEGMENTATION_NAMES = (
     "lung_upper_lobe_left.nii.gz",
     "lung_upper_lobe_right.nii.gz",
 )
-
-
-def create_additional_segmentations(folder: Path):
-    try:
-        if not (folder / "segmentations" / "skin.nii.gz").exists():
-            create_ct_segmentations(
-                image_filepath=folder / "ct.nii.gz",
-                output_folder=folder / "segmentations",
-                gpu_id=GPU_PCI_ID,
-                models=("body", "lung_vessels", "bones_tissue"),
-            )
-        else:
-            logger.info(f"Skipping {folder}")
-    except Exception as e:
-        logger.error(e)
 
 
 def create_z_cropper(mask: sitk.Image):
@@ -162,4 +137,6 @@ if __name__ == "__main__":
     for preprocessed_lung_case in preprocessed_lung_cases:
         logger.info(f"Processing {preprocessed_lung_case}")
         create_additional_segmentations(preprocessed_lung_case)
-        merge_upper_body_segmentations(preprocessed_lung_case / "segmentations")
+        merge_upper_body_segmentations(
+            preprocessed_lung_case / "segmentations", overwrite=True
+        )
