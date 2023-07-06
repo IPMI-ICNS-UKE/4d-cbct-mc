@@ -7,7 +7,7 @@ from ipmi.common.logger import init_fancy_logging
 from sklearn.model_selection import train_test_split
 
 from cbctmc.segmentation.dataset import SegmentationDataset
-from cbctmc.segmentation.labels import LABELS, LABELS_TO_LOAD, N_LABELS
+from cbctmc.segmentation.labels import LABELS_TO_LOAD
 
 np.random.seed(1337)
 random.seed(1337)
@@ -39,11 +39,30 @@ SEGMENTATION_FILEPATHS_LUNA16 = [
     for image_filepath in IMAGE_FILEPATHS_LUNA16
 ]
 
+# TOTALSEGMENTATOR
+ROOT_DIR_TOTALSEGMENTATOR = Path("/datalake/totalsegmentator_mc")
+IMAGE_FILEPATHS_TOTALSEGMENTATOR = sorted(
+    p for p in ROOT_DIR_TOTALSEGMENTATOR.glob("*/ct.nii.gz")
+)
+SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR = [
+    {
+        segmentation_name: ROOT_DIR_TOTALSEGMENTATOR
+        / image_filepath.parent.name
+        / "segmentations"
+        / f"{segmentation_name}.nii.gz"
+        for segmentation_name in LABELS_TO_LOAD
+    }
+    for image_filepath in IMAGE_FILEPATHS_TOTALSEGMENTATOR
+]
+
 IMAGE_FILEPATHS = []
 SEGMENTATION_FILEPATHS = []
 
-IMAGE_FILEPATHS += IMAGE_FILEPATHS_LUNA16
-SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_LUNA16
+# IMAGE_FILEPATHS += IMAGE_FILEPATHS_LUNA16
+# SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_LUNA16
+
+IMAGE_FILEPATHS += IMAGE_FILEPATHS_TOTALSEGMENTATOR
+SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR
 
 (
     train_image_filepaths,
@@ -58,10 +77,12 @@ train_dataset = SegmentationDataset(
     image_filepaths=train_image_filepaths,
     segmentation_filepaths=train_segmentation_filepaths,
     segmentation_merge_function=SegmentationDataset.merge_mc_segmentations,
-    patch_shape=(128, 128, 32),
+    patch_shape=(128, 128, 128),
     image_spacing_range=((1.0, 1.0), (1.0, 1.0), (1.0, 1.0)),
     patches_per_image=1.0,
-    random_rotation=False,
+    force_non_background=True,
+    force_balanced_sampling=True,
+    random_rotation=True,
     input_value_range=(-1024, 3071),
     output_value_range=(0, 1),
 )
@@ -69,14 +90,15 @@ test_dataset = SegmentationDataset(
     image_filepaths=test_image_filepaths,
     segmentation_filepaths=test_segmentation_filepaths,
     segmentation_merge_function=SegmentationDataset.merge_mc_segmentations,
-    patch_shape=(128, 128, 32),
-    center_crop=False,
+    patch_shape=(128, 128, 128),
     image_spacing_range=((1.0, 1.0), (1.0, 1.0), (1.0, 1.0)),
     patches_per_image=1.0,
-    random_rotation=False,
+    force_non_background=True,
+    force_balanced_sampling=True,
+    random_rotation=True,
     input_value_range=(-1024, 3071),
     output_value_range=(0, 1),
 )
 
-train_dataset.compile_and_save(OUTPUT_FOLDER / "train")
-test_dataset.compile_and_save(OUTPUT_FOLDER / "test")
+# train_dataset.compile_and_save(OUTPUT_FOLDER / "train")
+# test_dataset.compile_and_save(OUTPUT_FOLDER / "test")

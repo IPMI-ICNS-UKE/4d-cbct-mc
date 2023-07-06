@@ -1,8 +1,6 @@
 import logging
-from pathlib import Path
 
 from ipmi.common.logger import init_fancy_logging
-from ipmi.segmentation.ct import create_ct_segmentations
 
 if __name__ == "__main__":
     logger = logging.getLogger(__name__)

@@ -166,6 +166,8 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
         | None = None,
         random_rotation: bool = True,
         patches_per_image: int | float = 1,
+        force_non_background: bool = False,
+        force_balanced_sampling: bool = False,
         center_crop: bool = False,
         input_value_range: Tuple[Number, Number] | None = None,
         output_value_range: Tuple[Number, Number] | None = None,
@@ -186,6 +188,8 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
         self.image_spacing_range = image_spacing_range
         self.random_rotation = random_rotation
         self.patches_per_image = patches_per_image
+        self.force_non_background = force_non_background
+        self.force_balanced_sampling = force_balanced_sampling
         self.center_crop = center_crop
         self.input_value_range = input_value_range
         self.output_value_range = output_value_range
@@ -312,6 +316,7 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
 
         return image, segmentation, spacing
 
+    # flake8: noqa: C901
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
         if worker_info:
@@ -398,7 +403,10 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
                 no_crop=not self.center_crop,
             )
 
-            for i_patch in range(patches_per_image):
+            max_iterations = patches_per_image * 10
+            i_patch = 0
+            labels_already_sampled = {i_label: 0 for i_label in LABELS.keys()}
+            for i in range(max_iterations):
                 patch_slicing = SegmentationDataset.sample_random_patch_3d(
                     patch_shape=self.patch_shape, image_shape=image_arr.shape
                 )
@@ -412,6 +420,45 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
                 mask_arr_patch = segmentation_arr[segmentation_patch_slicing].astype(
                     np.float32, order="C"
                 )
+
+                if self.force_non_background:
+                    if not mask_arr_patch[..., 1:, :, :, :].any():
+                        continue
+
+                if self.force_balanced_sampling:
+                    min_count = min(labels_already_sampled.values())
+                    # sampling_probabilities = np.array(
+                    #     [
+                    #         1 / (count**2 + 1e-6)
+                    #         for count in labels_already_sampled.values()
+                    #     ]
+                    # )
+                    sampling_probabilities = np.array(
+                        [
+                            1 if count == min_count else 0
+                            for count in labels_already_sampled.values()
+                        ]
+                    )
+                    sampling_probabilities = (
+                        sampling_probabilities / sampling_probabilities.sum()
+                    )
+
+                    selected_label = np.random.choice(
+                        list(LABELS.keys()), p=sampling_probabilities
+                    )
+
+                    labels_present = set(
+                        i_label
+                        for i_label in LABELS.keys()
+                        if mask_arr_patch[..., i_label, :, :, :].any()
+                    )
+
+                    if selected_label not in labels_present:
+                        continue
+
+                    for i_label in LABELS.keys():
+                        if mask_arr_patch[..., i_label, :, :, :].any():
+                            labels_already_sampled[i_label] += 1
 
                 image_arr_patch = rescale_range(
                     image_arr_patch,
@@ -446,6 +493,10 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
                 }
 
                 yield data
+
+                i_patch += 1
+                if i_patch + 1 == patches_per_image:
+                    break
 
     def compile_and_save(self, folder: PathLike):
         folder = Path(folder)
