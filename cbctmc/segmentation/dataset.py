@@ -213,11 +213,7 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
         spacing, origin, direction = None, None, None
 
         for label_name, filepath in segmentation_filepaths.items():
-            try:
-                segmentation = sitk.ReadImage(str(filepath), sitk.sitkUInt8)
-            except RuntimeError:
-                # not found, continue
-                continue
+            segmentation = sitk.ReadImage(str(filepath), sitk.sitkUInt8)
             if not spacing:
                 spatial_shape = segmentation.GetSize()[::-1]
                 spacing = segmentation.GetSpacing()

@@ -1,6 +1,6 @@
 #[MATERIAL DEFINITION FOR MC-GPU: interaction mean free path and sampling data from PENELOPE 2006]
 #[MATERIAL NAME]
-# Polystrene(C8H8)
+# Polystyrene(C8H8)
 #[NOMINAL DENSITY (g/cm^3)]
 # 1.03
 #[NUMBER OF DATA VALUES]

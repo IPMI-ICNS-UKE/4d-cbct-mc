@@ -1,37 +1,20 @@
-import gzip
 import logging
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Sequence, Tuple
 
-import numpy as np
-import pkg_resources
 from ipmi.common.logger import init_fancy_logging
-from jinja2 import Environment, FileSystemLoader
 
-from cbctmc.common_types import PathLike
-from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.forward_projection import (
     create_geometry,
     prepare_image_for_rtk,
     project_forward,
     save_geometry,
 )
-from cbctmc.mc.geometry import MCAirGeometry, MCGeometry
-from cbctmc.mc.materials import MATERIALS_125KEV
+from cbctmc.mc.geometry import MCGeometry
 from cbctmc.mc.simulation import MCSimulation
-from cbctmc.mc.voxel_data import compile_voxel_data_string
-from cbctmc.segmentation.utils import (
-    merge_upper_body_bone_segmentations,
-    merge_upper_body_fat_segmentations,
-    merge_upper_body_muscle_segmentations,
-)
 
 if __name__ == "__main__":
     import itk
-    import matplotlib.pyplot as plt
-    import SimpleITK as sitk
 
     logging.getLogger("cbctmc").setLevel(logging.INFO)
     logger = logging.getLogger(__name__)
@@ -39,7 +22,7 @@ if __name__ == "__main__":
 
     init_fancy_logging()
 
-    N_PROJECTIONS = 24
+    N_PROJECTIONS = 16
 
     CONFIGS = {
         "high": {
@@ -51,10 +34,10 @@ if __name__ == "__main__":
 
     # device ID: runs
     RUNS = {
-        0: ("high",),
+        1: ("high",),
     }
 
-    GPU = 0
+    GPU = 1
 
     output_folder = Path("/datalake_fast/mc_test/mc_output/geometry_test")
 
@@ -76,13 +59,13 @@ if __name__ == "__main__":
     #     "source_to_isocenter_distance_offset": 4.209057564721922,
     # }
 
-    calibrations = {
-        "offset_x": 0.45619947910024583,
-        "offset_y": -3.9406363975565473,
-        "offset_z": -0.3525574933952014,
-        "source_to_detector_distance_offset": 1.4269519273107474,
-        "source_to_isocenter_distance_offset": 4.3951556461792665,
-    }
+    # calibrations = {
+    #     "offset_x": 0.45619947910024583,
+    #     "offset_y": -3.9406363975565473,
+    #     "offset_z": -0.3525574933952014,
+    #     "source_to_detector_distance_offset": 1.4269519273107474,
+    #     "source_to_isocenter_distance_offset": 4.3951556461792665,
+    # }
 
     calibrations = {
         "offset_x": 0.45619947910024583,
@@ -132,14 +115,13 @@ if __name__ == "__main__":
         input_value_range=None,
         output_value_range=None,
     )
-    # itk.imwrite(image, str(output_folder / run_folder / "geometry_densities.mha"))
 
-    fp_geometry = create_geometry(start_angle=270, n_projections=N_PROJECTIONS)
+    fp_geometry = create_geometry(start_angle=90, n_projections=N_PROJECTIONS)
     forward_projection = project_forward(
         image,
         geometry=fp_geometry,
     )
-    save_geometry(fp_geometry, output_folder / "geometry.xml")
+    save_geometry(fp_geometry, output_folder / run_folder / "geometry.xml")
 
     itk.imwrite(
         forward_projection,
@@ -155,16 +137,16 @@ if __name__ == "__main__":
             run_air_simulation=True,
             clean=True,
             gpu_id=GPU,
-            source_position_offset=(
-                calibrations["offset_x"],
-                calibrations["offset_y"],
-                calibrations["offset_z"],
-            ),
-            source_to_isocenter_distance_offset=calibrations[
-                "source_to_isocenter_distance_offset"
-            ],
-            source_to_detector_distance_offset=calibrations[
-                "source_to_detector_distance_offset"
-            ],
+            # source_position_offset=(
+            #     calibrations["offset_x"],
+            #     calibrations["offset_y"],
+            #     calibrations["offset_z"],
+            # ),
+            # source_to_isocenter_distance_offset=calibrations[
+            #     "source_to_isocenter_distance_offset"
+            # ],
+            # source_to_detector_distance_offset=calibrations[
+            #     "source_to_detector_distance_offset"
+            # ],
             force_rerun=True,
         )

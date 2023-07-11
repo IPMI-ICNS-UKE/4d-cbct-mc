@@ -148,10 +148,8 @@ class PatchStitcher:
             self.add_patch(patch, slicing)
 
     def calculate_mean(self, default_value: float = 0.0):
-        mean = np.full_like(self.n, fill_value=default_value)
-        mean[self.n > 0] = self.k + self.sum / self.n
-
-        return mean
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.nan_to_num(self.k + self.sum / self.n, nan=default_value)
 
     def calculate_variance(self, ddof: int = 0):
         return (self.sum_squared - self.sum**2 / self.n) / (self.n - ddof)

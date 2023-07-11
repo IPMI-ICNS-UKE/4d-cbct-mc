@@ -164,9 +164,6 @@ class MCSimulation:
                 cli_command=[
                     "MC-GPU_v1.3.x",
                     str(docker_input_filepath),
-                    # "|&",
-                    # "tee",
-                    # str(docker_output_folder / "log.txt"),
                 ],
                 gpus=(gpu_id,),
             )

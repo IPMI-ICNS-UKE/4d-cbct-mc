@@ -1,8 +1,19 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from cbctmc.mc.materials import MATERIALS_125KEV
 from cbctmc.mc.spectrum import SPECTRUM_125KVP
+
+
+@dataclass
+class DefaultReconstructionParameters:
+    water_pre_correction: Tuple[float, ...] = (
+        5.23387736e00,
+        7.55433186e-01,
+        5.31468975e-02,
+        -1.86219035e-02,
+        4.89407487e-03,
+    )
 
 
 @dataclass
@@ -51,3 +62,14 @@ class DefaultMCSimulationParameters:
     source_direction_cosines: Tuple[float, float, float] = (0.0, 1.0, 0.0)
     # source_aperture is given in degrees (polar, azimuthal)
     source_aperture: Tuple[float, float] = (-15.0, -15.0)
+
+    # some geometrical corrections to match RTK/MC-GPU geometry
+    geometrical_corrections: dict = field(
+        default_factory=lambda: {
+            "offset_x": -0.4276477849036505,
+            "offset_y": -3.749082176733503,
+            "offset_z": -0.32871583164473445,
+            "source_to_detector_distance_offset": 0.13054052787167872,
+            "source_to_isocenter_distance_offset": 3.2595168038949205,
+        }
+    )

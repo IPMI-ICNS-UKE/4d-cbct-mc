@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 from tqdm import tqdm
+
 from cbctmc.speedup.dataset import MCSpeedUpDataset
 
 if __name__ == "__main__":

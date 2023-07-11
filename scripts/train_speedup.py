@@ -1,19 +1,11 @@
-from pathlib import Path
-
-import numpy as np
-import torch
-import torch.nn as nn
 from ipmi.common.logger import init_fancy_logging
 from sklearn.model_selection import train_test_split
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
-from torch.utils.data import BatchSampler, DataLoader, SequentialSampler
+from torch.utils.data import DataLoader
 
-from cbctmc.config import get_user_config
-from cbctmc.speedup.blocks import ConvReLU2D
 from cbctmc.speedup.dataset import MCSpeedUpDataset
-from cbctmc.speedup.models import FlexUNet, MCSpeedUpNet, ResidualDenseNet2D
-from cbctmc.speedup.sampler import GroupedSampler
+from cbctmc.speedup.models import MCSpeedUpNet
 from cbctmc.speedup.trainer import MCSpeedUpTrainer
 
 if __name__ == "__main__":

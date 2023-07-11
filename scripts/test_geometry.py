@@ -1,37 +1,22 @@
-import gzip
 import logging
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Sequence, Tuple
 
 import numpy as np
-import pkg_resources
 from ipmi.common.logger import init_fancy_logging
-from jinja2 import Environment, FileSystemLoader
 
-from cbctmc.common_types import PathLike
-from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.forward_projection import (
     create_geometry,
     prepare_image_for_rtk,
     project_forward,
     save_geometry,
 )
-from cbctmc.mc.geometry import MCAirGeometry, MCGeometry
+from cbctmc.mc.geometry import MCGeometry
 from cbctmc.mc.materials import MATERIALS_125KEV
 from cbctmc.mc.simulation import MCSimulation
-from cbctmc.mc.voxel_data import compile_voxel_data_string
-from cbctmc.segmentation.utils import (
-    merge_upper_body_bone_segmentations,
-    merge_upper_body_fat_segmentations,
-    merge_upper_body_muscle_segmentations,
-)
 
 if __name__ == "__main__":
     import itk
-    import matplotlib.pyplot as plt
-    import SimpleITK as sitk
 
     logging.getLogger("cbctmc").setLevel(logging.INFO)
     logger = logging.getLogger(__name__)
