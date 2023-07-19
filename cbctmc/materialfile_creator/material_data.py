@@ -1,17 +1,15 @@
 from __future__ import annotations
-
+import os
 import click
 from jinja2 import Environment, FileSystemLoader
 from cbctmc.mc.dataio import save_text_file
 import pkg_resources
+import xraydb
 
 from tqdm import tqdm
 from scipy import integrate
 
-import re
-import xcom
 import numpy as np
-import tables
 
 
 class MaterialData:
@@ -21,7 +19,6 @@ class MaterialData:
         self._density = density
         self._energy_max = energy_max
         self._energy_min = 5000
-        self._molecules = MaterialData.parseMaterial(formula)
         self._energy_spectrum = np.arange(self._energy_min, self._energy_max + 5, 5)
         self._path_saving = path_saving
 
@@ -60,11 +57,11 @@ class MaterialData:
         x_squared, cdf, a, b = self.ritaIO()
         # for each datapoint the upper and lower limit are introduced, so that MC-GPU can efficiently find the
         # correct interval for a sampled random value between 0 and 1
-        lower_limit, upper_limit  = MaterialData.limitsBinSearch(cdf)
+        lower_limit, upper_limit = MaterialData.limitsBinSearch(cdf)
         # group second data part in the form:
         # [x² | CDF | a | b | lower_limit | upper_limit]
         second_data_part = np.stack([x_squared, cdf, a, b, lower_limit, upper_limit])
-        second_data_part = second_data_part.swapaxes(0,1)
+        second_data_part = second_data_part.swapaxes(0, 1)
         # the third data_part contains electron shell information of the involved elements and is based on
         # [Penelope 2006, Sec. 2.3, especially 2.3.1], tables/compton is taken from:
         # [F.Biggs, L.B.Mendelsohn, J.B.Mann 1975, Hartree Fock compton profiles for the elements]
@@ -84,46 +81,35 @@ class MaterialData:
         environment = Environment(loader=FileSystemLoader(assets_folder))
         template = environment.get_template("mcgpu_material.jinja2")
         rendered = template.render(params)
-
+        if not os.path.exists(self._path_saving):
+            os.makedirs(self._path_saving)
         save_text_file(rendered, self._path_saving + "/" + self._name + ".mcgpu", compress=False)
 
     def getMeanFreePath(self):
         # this function returns the mean free paths for rayleigh, compton, photoelectric and total scattering for the
-        # specified material
-        # cross-sections of compounds are weighted cross-sections of the involved elements, weighting factors are the
-        # mass fractions of the involved elements
-        # Data is given by a python implementation of the NIST calculator xcom
-        # (Copyright (c) 2020 Mikhail Zelenyi) github.com/Zelenyy/nist-calculators
+        # specified compound
+        # for every molecule in the compound, the molecular attenuation is calculated out of the atomic attenuation
+        # values given by th databanks of xraydb. Each atomic attenuation is weighted by the mass fraction of the
+        # element in the molecule
+        # total attenuation is calculated out of the sum of the molecular attenuation weigted with the mass fraction of
+        # each molecule, given by the user input
 
         energy = self._energy_spectrum
-        final_cross = np.zeros((4, len(energy)))
-        # iterate over all molecules in the material
-        for mol in range(len(self._molecules)):
-            formula = self._molecules[mol][1]
-            mat = xcom.MaterialFactory.from_formula(formula)
-            mol_cross = np.zeros((4, len(energy)))
-            # iterate over all elements in the molecules
-            for i in range(len(mat.elements_by_Z)):
-                data = xcom.calculate_cross_section(mat.elements_by_Z[i], energy)
-                en = data["energy"]
-                atomic_cross = np.zeros((4, en.shape[0]))
-                atomic_cross[0, :] = data["coherent"]
-                atomic_cross[1, :] = data["incoherent"]
-                atomic_cross[2, :] = data["photoelectric"]
-                atomic_cross[3, :] = data["total"]
+        mass_attenuation = np.zeros((4,len((energy))))
 
-                conversion_factor = 1.6605402
-                # 1/(atomic mass * 1.6605402) is factor to get from barn/atom to cm²/g (XCom returns cross-sections
-                # in barn/atom)
-                mol_cross += (
-                        atomic_cross * mat.weights[i] /
-                        (MaterialData.getAtomicMass(mat.elements_by_Z[i]) * conversion_factor)
-                )
-            final_cross += mol_cross * self._molecules[mol][0]
-
-        roh = float(self._density)
-        mean_free_path = (final_cross * roh) ** -1
-
+        molecules = self.parseCompoundToMolecules(self._formula)
+        for molecule in molecules:
+            elements = xraydb.chemparse(molecule)
+            molecular_mass = sum(xraydb.atomic_mass(element)*elements[element] for element in elements)
+            mass_attenuation_molecule = np.zeros((4, len((energy))))
+            for element in elements:
+                molecular_mass_fraction = xraydb.atomic_mass(element)*elements[element]/molecular_mass
+                mass_attenuation_molecule[0] += xraydb.mu_elam(element, energy, kind='coh') * molecular_mass_fraction
+                mass_attenuation_molecule[1] += xraydb.mu_elam(element, energy, kind='incoh') * molecular_mass_fraction
+                mass_attenuation_molecule[2] += xraydb.mu_elam(element, energy, kind='photo') * molecular_mass_fraction
+                mass_attenuation_molecule[3] += xraydb.mu_elam(element, energy, kind='total') * molecular_mass_fraction
+            mass_attenuation += mass_attenuation_molecule*molecules[molecule]
+        mean_free_path = (mass_attenuation * self._density)**-1
         return mean_free_path
 
     def getFormFactorSquared(self, energy_range: np.array):
@@ -143,13 +129,15 @@ class MaterialData:
                 conversion_factor * energy / electron_mass
         )
         # iterate over all molecules in the material
-        for mol in range(len(self._molecules)):
-            formula = self._molecules[mol][1]
-            mat = xcom.MaterialFactory.from_formula(formula)
+        molecules = self.parseCompoundToMolecules(self._formula)
+        for molecule in molecules:
             form_factor_squared_molecule = np.zeros(len(energy))
             # iterate over the elements in the molecule
-            for i in range(len(mat.elements_by_Z)):
-                z = mat.elements_by_Z[i]
+            elements = xraydb.chemparse(molecule)
+            molecular_mass = sum(xraydb.atomic_mass(element) * elements[element] for element in elements)
+            for element in elements:
+                z = xraydb.atomic_number(element)
+                molecular_mass_fraction = xraydb.atomic_mass(element) * elements[element] / molecular_mass
                 # the atomic form factor for elements is either calculated with an approximation which parameters have
                 # been fitted to experimental data or with a theoretical approximation
                 # the fitted parameters are listed in "Analytical cross-sections For Monte Carlo Simulation of Photon
@@ -159,8 +147,7 @@ class MaterialData:
                 fitted_atomic_form_factor = (z * (1 + par[0] * x ** 2 + par[1] * x ** 3 + par[2] * x ** 4)
                                       / ((1 + par[3] * x ** 2 + par[4] * x ** 4) ** 2))
                 if z < 10:
-                    form_factor_squared_molecule += (fitted_atomic_form_factor ** 2 * mat.weights[i]
-                                                     / MaterialData.getAtomicMass(mat.elements_by_Z[i]))
+                    form_factor_squared_molecule += fitted_atomic_form_factor ** 2 * molecular_mass_fraction
                 else:
                     atomic_form_factor = np.zeros(len(energy))
                     for j in range(len(energy)):
@@ -171,9 +158,8 @@ class MaterialData:
                                 atomic_form_factor[j] = fitted_atomic_form_factor[j]
                             else:
                                 atomic_form_factor[j] = MaterialData.theoreticalFormFactor(energy[j], z)
-                    form_factor_squared_molecule += (atomic_form_factor ** 2 * mat.weights[i]
-                                                     / MaterialData.getAtomicMass(mat.elements_by_Z[i]))
-            form_factor_squared += form_factor_squared_molecule * self._molecules[mol][0]
+                    form_factor_squared_molecule += atomic_form_factor ** 2 * molecular_mass_fraction
+            form_factor_squared += form_factor_squared_molecule * molecules[molecule]
         return x, form_factor_squared
 
     def ritaIO(self):
@@ -224,16 +210,16 @@ class MaterialData:
                 error = np.array([integrate.simpson(np.abs(pdf[l:u] - MaterialData.rationalInterpolation(
                     x_squared[l:u], x_squared[sample_indices], cdf[sample_indices], a, b
                 )), x_squared[l:u]) for l, u in zip(sample_indices[:-1], sample_indices[1:])])
-            # in all other iteration the error of the two new intervals are calculated,
+            # in all other iteration the error of the  new intervals are calculated,
             # in the last iteration the final a and b are calculated, a new error is not necessary
-            elif i<96:
+            elif i < 96:
                 error_new = np.array([integrate.simpson(np.abs(pdf[l:u] - MaterialData.rationalInterpolation(
                     x_squared[l:u], x_squared[sample_indices], cdf[sample_indices], a, b
                 )), x_squared[l:u]) for l, u in zip(sample_indices[max_error_interval:max_error_interval+2],
                                                     sample_indices[max_error_interval+1:max_error_interval+3])])
                 error[max_error_interval] = error_new[0]
                 error = np.insert(error, max_error_interval+1, error_new[1])
-            if i<96:
+            if i < 96:
                 max_error_interval = np.argmax(error)
                 # calculate new grid point in the middle of the interval and corresponding factors a and b
                 new_grid_point = (sample_indices[max_error_interval+1] + sample_indices[max_error_interval])/2
@@ -246,28 +232,28 @@ class MaterialData:
     def getShellInformation(self):
         # see [Penelope 2006, Sec. 2.3, especially 2.3.1], tables/compton is taken from:
         # [F.Biggs, L.B.Mendelsohn, J.B.Mann 1975, Hartree Fock compten profiles for the elements]
-        molecules = self._molecules
+        molecules = self.parseCompoundToMolecules(self._formula)
         compten = np.genfromtxt(
             "../../tables/compten", skip_header=1, usecols=range(19), delimiter="\t"
         )
         shell_information = []
         alpha = 1 / (137.036)
-        for i in range(len(molecules)):
-            comp = xcom.MaterialFactory.from_formula(molecules[i][1])
-            elementsbyz = comp.elements_by_Z
-            weights = comp.weights
-            noatoms = self.getNoAtoms(molecules[i][1])
-            for j in range(len(elementsbyz)):
-                rowcomp = compten[elementsbyz[j] - 1]
-                for k in range(int(len(rowcomp) / 3)):
+        for molecule in molecules:
+            elements = xraydb.chemparse(molecule)
+            # noatoms = self.getNoAtoms(molecules[i][1])
+            for element in elements:
+                noatoms = elements[element]
+                element_z = xraydb.atomic_number(element)
+                element_compten_data = compten[element_z - 1]
+                for k in range(int(len(element_compten_data) / 3)):
                     k = k * 3 + 1
-                    if not np.isnan(rowcomp[k]):
+                    if not np.isnan(element_compten_data[k]):
                         shell_information.append(
                             [
-                                rowcomp[k + 1] * noatoms[j] * molecules[i][0],
-                                rowcomp[k + 2],
-                                rowcomp[k] * 1 / alpha,
-                                elementsbyz[j],
+                                element_compten_data[k + 1] * noatoms * molecules[molecule],
+                                element_compten_data[k + 2],
+                                element_compten_data[k] * 1 / alpha,
+                                element_z,
                                 0,
                             ]
                         )
@@ -276,18 +262,15 @@ class MaterialData:
         return shell_information
 
     @staticmethod
-    def getNoAtoms(formula):
-        # returns the number of atoms of each element in a molecule
-        ele = re.findall(r"([A-Z][a-z]*)([1-9])*", formula)
-        for i in range(len(ele)):
-            mat = xcom.MaterialFactory.from_formula(ele[i][0])
-            if ele[i][1] == "":
-                ele[i] = [mat.elements_by_Z[0], 1]
-            else:
-                ele[i] = [mat.elements_by_Z[0], int(ele[i][1])]
-        ele = np.array(ele)
-        ele = ele[ele[:, 0].argsort()]
-        return ele[:, 1]
+    def theoreticalFormFactor(energy: np.array, z: int):
+        # "PENELOPE-2006: A Code System for Monte Carlo Simulation of Electron and Photon Transport";Francesc Salvat,
+        # José M. Fernández-Varea, Josep Sempau; 2006; Equations 2.8 and 2.9
+        fine_structure_constant = 1/137.036
+        electron_mass = 5.10998918 * 1e5
+        a = fine_structure_constant*(z-5/16)
+        b = np.sqrt(1-a**2)
+        Q = energy / (a * electron_mass)
+        return np.sin(2 * b * np.arctan(Q)) / (b * Q * (1 + Q ** 2) ** b)
 
     @staticmethod
     def limitsBinSearch(cdf):
@@ -306,7 +289,8 @@ class MaterialData:
                     break
         uplim[-1] = length
         lolim[-1] = 1
-        return lolim, uplim
+        return lolim.astype(int), uplim.astype(int)
+
     @staticmethod
     def rationalInterpolation(x, x_samples, cdf_samples, a, b):
         # data samples of PDF(x) are interpolated according to [Penelope 2006 Eq. 1.55 and 1.56]
@@ -325,29 +309,15 @@ class MaterialData:
                     break
         return pdf_interpolated
 
-
-
     @staticmethod
-    def theoreticalFormFactor(energy: np.array, z: int):
-        # "PENELOPE-2006: A Code System for Monte Carlo Simulation of Electron and Photon Transport";Francesc Salvat,
-        # José M. Fernández-Varea, Josep Sempau; 2006; Equations 2.8 and 2.9
-        fine_structure_constant = 1/137.036
-        electron_mass = 5.10998918 * 1e5
-        a = fine_structure_constant*(z-5/16)
-        b = np.sqrt(1-a**2)
-        Q = energy / (a * electron_mass)
-        return np.sin(2 * b * np.arctan(Q)) / (b * Q * (1 + Q ** 2) ** b)
-
-    @staticmethod
-    def parseMaterial(material: str):
-        # split material input into molecules and corresponding mass fraction
-        compounds = material.split("_")
-        for i in range(len(compounds)):
-            compounds[i] = compounds[i].split(":")
-            if len(compounds[i]) == 1:
-                compounds[i] = [1, compounds[i][0]]
-            compounds[i][0] = float(compounds[i][0])
-        return compounds
+    def parseCompoundToMolecules(formula: str):
+        # split compund formula input into molecules and corresponding mass fractions
+        if len(formula.split(":")) == 1:
+            return {formula: 1}
+        molecules = dict((molecule.strip(), float(mass_fraction.strip()))
+                      for mass_fraction, molecule in (group.split(':')
+                                   for group in formula.split('_')))
+        return molecules
 
     @staticmethod
     def convert_numpy_to_string(x):
@@ -356,22 +326,15 @@ class MaterialData:
             string += (' '.join(map(lambda x: "{}".format(x), row))) + "\n"
         return string[:-2]
 
-    @staticmethod
-    def getAtomicMass(z: int):
-        # use xcom data tables to return atomic mass of the element with atomic number z
-        z = "00" + str(z)
-        with tables.open_file(xcom.NIST_XCOM_HDF5_PATH) as h5file:
-            attr = h5file.get_node("/Z" + str(z[-3:]), "data").attrs
-            return attr["AtomicWeight"].item()
 
 
 @click.command()
 @click.option("--name", help="Material name")
 @click.option(
     "--formula",
-    help="Enter chemical material definition. For every compound give mass fraction "
-    "and chemical formula seperated with : every compound is seperated with _."
-    'Examples: "H2O", "0.78:N_0.21:O_0.01:Ar", "0.965:H2O_0.035:NaCl"',
+    help="Enter chemical material definition. For every compound list all molecules and mass fraction of that molecule"
+         "in the compound, in the form: mass_fraction1:molecule1_mass_fraction2:molecule2. "
+         '"Examples: "H2O", "0.78:N_0.21:O_0.01:Ar", "0.965:H2O_0.035:NaCl"',
 )
 @click.option("--density", help="Density in g/cm³")
 @click.option("--energy_max", default=125000, type=int, help="Insert the maximal röntgen spectra energy in eV. "
