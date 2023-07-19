@@ -87,23 +87,102 @@ SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR = [
     for image_filepath in IMAGE_FILEPATHS_TOTALSEGMENTATOR
 ]
 
+# INHOUSE
+patient_ids = [
+    22,
+    24,
+    32,
+    33,
+    68,
+    69,
+    74,
+    78,
+    91,
+    92,
+    104,
+    106,
+    109,
+    115,
+    116,
+    121,
+    124,
+    132,
+    142,
+    145,
+    146,
+]
+train_patients, test_patients = train_test_split(
+    patient_ids, train_size=0.75, random_state=42
+)
+ROOT_DIR_INHOUSE = Path("/datalake_fast/4d_ct_lung_uke_artifact_free/")
+
+
+IMAGE_FILEPATHS_INHOUSE_TRAIN = [
+    ROOT_DIR_INHOUSE
+    / f"{patient_id:03d}_4DCT_Lunge_amplitudebased_complete/phase_00.nii"
+    for patient_id in sorted(train_patients)
+]
+
+IMAGE_FILEPATHS_INHOUSE_TEST = [
+    ROOT_DIR_INHOUSE
+    / f"{patient_id:03d}_4DCT_Lunge_amplitudebased_complete/phase_00.nii"
+    for patient_id in sorted(test_patients)
+]
+
+SEGMENTATION_FILEPATHS_INHOUSE_TRAIN = [
+    {
+        segmentation_name: ROOT_DIR_INHOUSE
+        / image_filepath.parent.name
+        / "segmentations"
+        / "phase_00"
+        / f"{segmentation_name}.nii.gz"
+        for segmentation_name in LABELS_TO_LOAD
+    }
+    for image_filepath in IMAGE_FILEPATHS_INHOUSE_TRAIN
+]
+SEGMENTATION_FILEPATHS_INHOUSE_TEST = [
+    {
+        segmentation_name: ROOT_DIR_INHOUSE
+        / image_filepath.parent.name
+        / "segmentations"
+        / "phase_00"
+        / f"{segmentation_name}.nii.gz"
+        for segmentation_name in LABELS_TO_LOAD
+    }
+    for image_filepath in IMAGE_FILEPATHS_INHOUSE_TEST
+]
+
+# IMAGE_FILEPATHS_INHOUSE_TRAIN = sorted(
+#     ROOT_DIR_INHPUSE / f"{patient_id}_4DCT_Lunge_amplitudebased_complete/phase_00.nii"
+#     for patient_id in train_patients
+# )
+# IMAGE_FILEPATHS_INHOUSE_TEST = sorted(
+#     ROOT_DIR_INHPUSE / f"{patient_id}_4DCT_Lunge_amplitudebased_complete/phase_00.nii"
+#     for patient_id in test_patients
+# )
+
+
 IMAGE_FILEPATHS = []
 SEGMENTATION_FILEPATHS = []
 
 # IMAGE_FILEPATHS += IMAGE_FILEPATHS_LUNA16
 # SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_LUNA16
 
-IMAGE_FILEPATHS += IMAGE_FILEPATHS_TOTALSEGMENTATOR
-SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR
+# IMAGE_FILEPATHS += IMAGE_FILEPATHS_TOTALSEGMENTATOR
+# SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR
+# (
+#     train_image_filepaths,
+#     test_image_filepaths,
+#     train_segmentation_filepaths,
+#     test_segmentation_filepaths,
+# ) = train_test_split(
+#     IMAGE_FILEPATHS, SEGMENTATION_FILEPATHS, train_size=0.90, random_state=1337
+# )
 
-(
-    train_image_filepaths,
-    test_image_filepaths,
-    train_segmentation_filepaths,
-    test_segmentation_filepaths,
-) = train_test_split(
-    IMAGE_FILEPATHS, SEGMENTATION_FILEPATHS, train_size=0.90, random_state=1337
-)
+train_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TRAIN
+test_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TEST
+train_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TRAIN
+test_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TEST
 
 
 train_dataset = SegmentationDataset(
@@ -115,7 +194,7 @@ train_dataset = SegmentationDataset(
     patches_per_image=8 * 4,
     force_non_background=True,
     force_balanced_sampling=False,
-    random_rotation=False,
+    random_rotation=True,
     input_value_range=(-1024, 3071),
     output_value_range=(0, 1),
 )
@@ -203,7 +282,7 @@ trainer = CTSegmentationTrainer(
     train_loader=train_data_loader,
     val_loader=test_data_loader,
     run_folder="/datalake2/runs/mc_segmentation",
-    experiment_name="mc_segmentation",
+    experiment_name="mc_segmentation_inhouse_finetuning",
     device=DEVICE,
 )
 

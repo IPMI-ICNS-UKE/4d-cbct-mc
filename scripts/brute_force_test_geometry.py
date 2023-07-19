@@ -1,38 +1,20 @@
-import gzip
 import logging
-import time
-from datetime import datetime
 from pathlib import Path
-from typing import List, Sequence, Tuple
 
-import numpy as np
-import pkg_resources
 from ipmi.common.logger import init_fancy_logging
-from jinja2 import Environment, FileSystemLoader
 
-from cbctmc.common_types import PathLike
-from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.forward_projection import (
     create_geometry,
     prepare_image_for_rtk,
     project_forward,
     save_geometry,
 )
-from cbctmc.mc.geometry import MCAirGeometry, MCGeometry
-from cbctmc.mc.materials import MATERIALS_125KEV
-from cbctmc.mc.projection import get_projections_from_folder, projections_to_numpy
+from cbctmc.mc.geometry import MCGeometry
 from cbctmc.mc.simulation import MCSimulation
-from cbctmc.mc.voxel_data import compile_voxel_data_string
 from cbctmc.metrics import normalized_cross_correlation
-from cbctmc.segmentation.utils import (
-    merge_upper_body_bone_segmentations,
-    merge_upper_body_fat_segmentations,
-    merge_upper_body_muscle_segmentations,
-)
 
 if __name__ == "__main__":
     import itk
-    import matplotlib.pyplot as plt
     import nevergrad as ng
     import SimpleITK as sitk
 
@@ -42,7 +24,7 @@ if __name__ == "__main__":
 
     init_fancy_logging()
 
-    N_PROJECTIONS = 16
+    N_PROJECTIONS = 8
 
     CONFIGS = {
         "high": {
@@ -156,7 +138,7 @@ if __name__ == "__main__":
     )
     itk.imwrite(image, str(output_folder / "geometry_densities.mha"))
 
-    fp_geometry = create_geometry(start_angle=270, n_projections=N_PROJECTIONS)
+    fp_geometry = create_geometry(start_angle=90, n_projections=N_PROJECTIONS)
     forward_projection = project_forward(
         image,
         geometry=fp_geometry,
@@ -180,17 +162,17 @@ if __name__ == "__main__":
     optimizer_class = ng.optimizers.registry["TwoPointsDE"]
     optimizer = optimizer_class(parametrization=parametrization)
 
-    optimizer = optimizer_class.load(
-        "/home/fmadesta/research/4d-cbct-mc/optimizer_brute_force_1x1x1_patient.pkl"
-    )
-
-    # optimizer.suggest(
-    #     offset_x=0.0,
-    #     offset_y=0.0,
-    #     offset_z=0.0,
-    #     source_to_detector_distance_offset=0.0,
-    #     source_to_isocenter_distance_offset=0.0,
+    # optimizer = optimizer_class.load(
+    #     "/home/fmadesta/research/4d-cbct-mc/optimizer_brute_force_1x1x1_patient.pkl"
     # )
+
+    optimizer.suggest(
+        offset_x=0.0,
+        offset_y=0.0,
+        offset_z=0.0,
+        source_to_detector_distance_offset=0.0,
+        source_to_isocenter_distance_offset=0.0,
+    )
 
     for run in RUNS[GPU]:
         simulation_config = CONFIGS[run]

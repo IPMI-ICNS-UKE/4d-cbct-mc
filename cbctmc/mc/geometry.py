@@ -12,12 +12,15 @@ from typing import List, Sequence, Tuple, Union
 import numpy as np
 import pkg_resources
 import SimpleITK as sitk
+import torch.nn as nn
 from jinja2 import Environment, FileSystemLoader
 
 from cbctmc.common_types import FloatTuple3D, PathLike
 from cbctmc.mc.dataio import save_text_file
 from cbctmc.mc.materials import MATERIALS_125KEV, Material
 from cbctmc.mc.voxel_data import compile_voxel_data_string
+from cbctmc.segmentation.labels import get_label_index
+from cbctmc.segmentation.segmenter import MCSegmenter
 from cbctmc.utils import resample_image_spacing
 
 logger = logging.getLogger(__name__)
@@ -53,6 +56,7 @@ class BaseMaterialMapper(ABC):
 
         Returns two arrays (materials and densities).
         """
+
         mask, materials, densities = self._prepare(
             segmentation=segmentation,
             materials_output=materials_output,
@@ -217,15 +221,16 @@ class MaterialMapperPipeline(
     def execute(
         self, image: np.ndarray, image_spacing: FloatTuple3D | None = None
     ) -> Tuple[np.ndarray, np.ndarray]:
+        # image shoud already be resampled to the
+        # target image spacing (passed via image_spacing)
+
         materials = None
         densities = None
         for mapper, segmentation in self:
             if segmentation is None:
-                logger.info(f"Skipping {mapper}")
+                logger.info(f"Skipping {mapper} (No segmentation given)")
                 continue
-
-            logger.info(f"Executing {mapper}")
-            if not isinstance(segmentation, np.ndarray):
+            elif isinstance(segmentation, (str, Path)):
                 # load segmentation from file and convert to numpy array
                 segmentation = sitk.ReadImage(str(segmentation))
                 if image_spacing:
@@ -238,6 +243,10 @@ class MaterialMapperPipeline(
                 # convert to numpy, swap zyx (itk) -> xyz (numpy)
                 segmentation = sitk.GetArrayFromImage(segmentation).swapaxes(0, 2)
                 segmentation = np.asarray(segmentation, dtype=np.uint8)
+            elif not isinstance(segmentation, np.ndarray):
+                raise ValueError("Unsupported segmentytion type")
+
+            logger.info(f"Executing {mapper}")
             materials, densities = mapper.map(
                 image=image,
                 segmentation=segmentation,
@@ -258,6 +267,8 @@ class MaterialMapperPipeline(
         stomach_segmentation: np.ndarray | PathLike | None = None,
         lung_segmentation: np.ndarray | PathLike | None = None,
         lung_vessel_segmentation: np.ndarray | PathLike | None = None,
+        model: nn.Module | None = None,
+        model_device: str = "cuda",
     ):
         # the order is important
         pipeline = [
@@ -272,7 +283,11 @@ class MaterialMapperPipeline(
             (LungVesselsMaterialMapper(), lung_vessel_segmentation),
         ]
 
-        return cls(pipeline)
+        instance = cls(pipeline)
+        instance._model = model
+        instance._device = model_device
+
+        return instance
 
 
 class MCGeometry:
@@ -280,13 +295,24 @@ class MCGeometry:
         self,
         materials: np.ndarray,
         densities: np.ndarray,
-        image_spacing: Tuple[float, float, float],
+        image_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
         image_direction: Tuple[float, ...] | None = None,
         image_origin: Tuple[float, float, float] | None = None,
     ):
+        if materials.shape != densities.shape:
+            raise ValueError(
+                f"Shape mismatch: {materials.shape=} != {densities.shape=}"
+            )
+
         self.materials = materials
         self.densities = densities
+
         self.image_spacing = image_spacing
+        if not image_direction:
+            image_direction = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+        if not image_origin:
+            image_origin = tuple(size / 2 for size in self.image_size)
+
         self.image_direction = image_direction
         self.image_origin = image_origin
 
@@ -330,10 +356,8 @@ class MCGeometry:
     def _array_to_itk(self, array: np.ndarray) -> sitk.Image:
         array = sitk.GetImageFromArray(array.swapaxes(0, 2))
         array.SetSpacing(self.image_spacing)
-        if self.image_origin:
-            array.SetOrigin(self.image_origin)
-        if self.image_direction:
-            array.SetDirection(self.image_direction)
+        array.SetOrigin(self.image_origin)
+        array.SetDirection(self.image_direction)
 
         return array
 
@@ -349,6 +373,8 @@ class MCGeometry:
     def from_image(
         cls,
         image_filepath: PathLike,
+        segmenter: MCSegmenter | None = None,
+        segmenter_kwargs: dict | None = None,
         body_segmentation_filepath: PathLike | None = None,
         bone_segmentation_filepath: PathLike | None = None,
         muscle_segmentation_filepath: PathLike | None = None,
@@ -361,6 +387,7 @@ class MCGeometry:
     ) -> MCGeometry:
         image = sitk.ReadImage(str(image_filepath))
         if image_spacing:
+            logger.info(f"Resampling image to image spacing of {image_spacing}")
             image = resample_image_spacing(
                 image,
                 new_spacing=image_spacing,
@@ -374,15 +401,40 @@ class MCGeometry:
         # convert to numpy, swap zyx (itk) -> xyz (numpy)
         image = sitk.GetArrayFromImage(image).swapaxes(0, 2)
 
+        if segmenter:
+            # if a segmenter is given: predict segmentations
+            segmentation = segmenter.segment(image)
+
+            body_segmentation = segmentation[get_label_index("background")] == 0
+            bone_segmentation = segmentation[get_label_index("upper_body_bones")]
+            muscle_segmentation = segmentation[get_label_index("upper_body_muscles")]
+            fat_segmentation = segmentation[get_label_index("upper_body_fat")]
+            liver_segmentation = segmentation[get_label_index("liver")]
+            stomach_segmentation = segmentation[get_label_index("stomach")]
+            lung_segmentation = segmentation[get_label_index("lung")]
+            lung_vessel_segmentation = segmentation[get_label_index("lung_vessels")]
+
+        else:
+            body_segmentation = None
+            bone_segmentation = None
+            muscle_segmentation = None
+            fat_segmentation = None
+            liver_segmentation = None
+            stomach_segmentation = None
+            lung_segmentation = None
+            lung_vessel_segmentation = None
+
+        # passed segmentation filepaths overwrite predicted segmentations
         mapper_pipeline = MaterialMapperPipeline.create_default_pipeline(
-            body_segmentation=body_segmentation_filepath,
-            bone_segmentation=bone_segmentation_filepath,
-            muscle_segmentation=muscle_segmentation_filepath,
-            fat_segmentation=fat_segmentation_filepath,
-            liver_segmentation=liver_segmentation_filepath,
-            stomach_segmentation=stomach_segmentation_filepath,
-            lung_segmentation=lung_segmentation_filepath,
-            lung_vessel_segmentation=lung_vessel_segmentation_filepath,
+            body_segmentation=body_segmentation_filepath or body_segmentation,
+            bone_segmentation=bone_segmentation_filepath or bone_segmentation,
+            muscle_segmentation=muscle_segmentation_filepath or muscle_segmentation,
+            fat_segmentation=fat_segmentation_filepath or fat_segmentation,
+            liver_segmentation=liver_segmentation_filepath or liver_segmentation,
+            stomach_segmentation=stomach_segmentation_filepath or stomach_segmentation,
+            lung_segmentation=lung_segmentation_filepath or lung_segmentation,
+            lung_vessel_segmentation=lung_vessel_segmentation_filepath
+            or lung_vessel_segmentation,
         )
 
         materials, densities = mapper_pipeline.execute(
@@ -407,6 +459,8 @@ class MCGeometry:
             raise ValueError(
                 f"Shape mismatch: {materials.shape=} != {densities.shape=}"
             )
+        materials = np.rot90(materials, k=3, axes=(0, 1))
+        densities = np.rot90(densities, k=3, axes=(0, 1))
         n_voxels_x, n_voxels_y, n_voxels_z = materials.shape
         # Note: MC-GPU uses cm instead of mm (thus dividing by 10)
         params = {
@@ -450,6 +504,222 @@ class MCAirGeometry(MCGeometry):
         densities = np.full(
             (1, 1, 1), fill_value=air_material.density, dtype=np.float32
         )
+
+        super().__init__(
+            materials=materials, densities=densities, image_spacing=image_spacing
+        )
+
+
+class CylindricalPhantomMixin:
+    @staticmethod
+    def cylindrical_mask(
+        shape: Tuple[int, int, int],
+        center: Tuple[float, float, float],
+        radius: float,
+        height: float,
+    ):
+        x = np.arange(0, shape[0])
+        y = np.arange(0, shape[1])
+        z = np.arange(0, shape[2])
+        x, y, z = np.meshgrid(x, y, z, indexing="ij")
+        mask = (
+            ((x - center[0]) ** 2 + (y - center[1]) ** 2 <= radius**2)
+            & (z >= center[2] - height / 2)
+            & (z < center[2] + height / 2)
+        )
+
+        return mask
+
+
+class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
+    PHANTOM_BODY = {
+        "h2o": {
+            "material": MATERIALS_125KEV["h2o"],
+            "angle": 0.0,
+            "distance": 0.0,
+            "radius": 100.0,
+            "length": 100.0,
+        }
+    }
+
+    CIRCULAR_SYMMETRY_ROIS = {
+        "air_1": {
+            "material": MATERIALS_125KEV["air"],
+            "angle": 135,
+            "distance": 35.355,
+            "radius": 1.5,
+            "length": 24.0,
+        },
+        "air_2": {
+            "material": MATERIALS_125KEV["air"],
+            "angle": 45,
+            "distance": 35.355,
+            "radius": 1.5,
+            "length": 24.0,
+        },
+        "air_3": {
+            "material": MATERIALS_125KEV["air"],
+            "angle": 315,
+            "distance": 35.355,
+            "radius": 1.5,
+            "length": 24.0,
+        },
+        "air_4": {
+            "material": MATERIALS_125KEV["air"],
+            "angle": 225,
+            "distance": 35.355,
+            "radius": 1.5,
+            "length": 24.0,
+        },
+    }
+
+    SENSITOMETRY_ROIS = {
+        "air_1": {
+            "material": MATERIALS_125KEV["air"],
+            "angle": 90,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+        "teflon": {
+            "material": MATERIALS_125KEV["teflon"],
+            "angle": 60,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+        "delrin": {
+            "material": MATERIALS_125KEV["delrin"],
+            "angle": 0,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+        "bone_020": {
+            "material": MATERIALS_125KEV["bone_020"],
+            "angle": 330,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+        "acrylic": {
+            "material": MATERIALS_125KEV["acrylic"],
+            "angle": 300,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+        "air_2": {
+            "material": MATERIALS_125KEV["air"],
+            "angle": 270,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+        "polystyrene": {
+            "material": MATERIALS_125KEV["polystyrene"],
+            "angle": 240,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+        "ldpe": {
+            "material": MATERIALS_125KEV["ldpe"],
+            "angle": 180,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+        "bone_050": {
+            "material": MATERIALS_125KEV["bone_050"],
+            "angle": 150,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+        "pmp": {
+            "material": MATERIALS_125KEV["pmp"],
+            "angle": 120,
+            "distance": 58.7,
+            "radius": 6.5,
+            "length": 24.0,
+        },
+    }
+
+    def __init__(
+        self,
+        shape: Tuple[int, int, int] = (500, 500, 500),
+        image_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    ):
+        phantom_center = np.array(shape) / 2
+
+        air_material = MATERIALS_125KEV["air"]
+        materials = np.full(shape, fill_value=air_material.number, dtype=np.uint8)
+        densities = np.full(shape, fill_value=air_material.density, dtype=np.float32)
+
+        for roi_group in (
+            MCCatPhan604Geometry.PHANTOM_BODY,
+            MCCatPhan604Geometry.SENSITOMETRY_ROIS,
+            MCCatPhan604Geometry.CIRCULAR_SYMMETRY_ROIS,
+        ):
+            for roi_name, roi in roi_group.items():
+                # convert to rad
+                phi = roi["angle"] * np.pi / 180.0
+                roi_center = np.array([np.cos(phi), -np.sin(phi), 0.0])
+                roi_center = (roi_center * roi["distance"]) + phantom_center
+
+                roi_mask = MCCatPhan604Geometry.cylindrical_mask(
+                    shape=shape,
+                    center=roi_center,
+                    radius=roi["radius"],
+                    height=roi["length"],
+                )
+
+                materials[roi_mask] = roi["material"].number
+                densities[roi_mask] = roi["material"].density
+
+        super().__init__(
+            materials=materials, densities=densities, image_spacing=image_spacing
+        )
+
+
+class MCWaterPhantomGeometry(MCGeometry, CylindricalPhantomMixin):
+    PHANTOM_BODY = {
+        "h2o": {
+            "material": MATERIALS_125KEV["h2o"],
+            "angle": 0.0,
+            "distance": 0.0,
+            "radius": 100.0,
+            "length": 100.0,
+        }
+    }
+
+    def __init__(
+        self,
+        shape: Tuple[int, int, int] = (500, 500, 500),
+        image_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    ):
+        phantom_center = np.array(shape) / 2
+
+        air_material = MATERIALS_125KEV["air"]
+        materials = np.full(shape, fill_value=air_material.number, dtype=np.uint8)
+        densities = np.full(shape, fill_value=air_material.density, dtype=np.float32)
+
+        for roi_name, roi in MCWaterPhantomGeometry.PHANTOM_BODY.items():
+            # convert to rad
+            phi = roi["angle"] * np.pi / 180.0
+            roi_center = np.array([np.cos(phi), -np.sin(phi), 0.0])
+            roi_center = (roi_center * roi["distance"]) + phantom_center
+
+            roi_mask = MCCatPhan604Geometry.cylindrical_mask(
+                shape=shape,
+                center=roi_center,
+                radius=roi["radius"],
+                height=roi["length"],
+            )
+
+            materials[roi_mask] = roi["material"].number
+            densities[roi_mask] = roi["material"].density
 
         super().__init__(
             materials=materials, densities=densities, image_spacing=image_spacing

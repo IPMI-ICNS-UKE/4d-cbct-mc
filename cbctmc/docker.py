@@ -5,10 +5,23 @@ from pathlib import Path
 from typing import Sequence
 
 import docker
+from docker.errors import ImageNotFound
 
 DOCKER_IMAGE = "imaging:latest"
 DOCKER_HOST_PATH_PREFIX = Path("/host")
 DOCKER_MOUNTS = {"/": {"bind": str(DOCKER_HOST_PATH_PREFIX), "mode": "rw"}}
+
+
+def check_image_exists(image_name: str, raise_error: bool = False) -> Optional[bool]:
+    docker_client = docker.from_env()
+    try:
+        docker_client.images.get(image_name)
+        return True
+    except ImageNotFound:
+        if raise_error:
+            raise
+        else:
+            return False
 
 
 def execute_in_docker(

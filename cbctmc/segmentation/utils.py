@@ -125,7 +125,7 @@ def merge_upper_body_fat_segmentations(
     )
 
 
-def merge_upper_body_segmentations(folder: Path, overwrite: bool = False):
+def merge_upper_body_segmentations(folder: Path, overwrite: bool = True):
     logger.info(f"Merging {folder}")
     merge_upper_body_bone_segmentations(folder, overwrite=overwrite)
     merge_upper_body_muscle_segmentations(folder, overwrite=overwrite)

@@ -48,6 +48,7 @@ def prepare_image_for_rtk(
             image_arr, input_range=input_value_range, output_range=output_value_range
         )
 
+    image_arr = np.rot90(image_arr, k=1, axes=(0, 1))
     # CT axes (RAI orientation): x: R-L, y: A-P, z: I-S
     # RTK axes (IEC 61217)       x: R-L, y: I-S, z: P-A
     # swap y and z, then reverse z
