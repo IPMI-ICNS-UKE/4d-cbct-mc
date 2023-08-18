@@ -67,9 +67,7 @@ class DefaultMCSimulationParameters:
     # some geometrical corrections to match RTK/MC-GPU geometry
     geometrical_corrections: dict = field(
         default_factory=lambda: {
-            "offset_x": -0.5030858965528291,
-            "offset_y": -3.749082176733503,
-            "offset_z": -0.29206039325204886,
+            "source_position_offset": (-0.5030858965528291, -3.749082176733503, -0.29206039325204886),
             "source_to_detector_distance_offset": 0.13054052787167872,
             "source_to_isocenter_distance_offset": 3.2595168038949205,
         }
