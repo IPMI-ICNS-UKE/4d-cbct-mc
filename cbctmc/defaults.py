@@ -7,12 +7,13 @@ from cbctmc.mc.spectrum import SPECTRUM_125KVP
 
 @dataclass
 class DefaultReconstructionParameters:
-    water_pre_correction: Tuple[float, ...] = (
-        5.23387736e00,
-        7.55433186e-01,
-        5.31468975e-02,
-        -1.86219035e-02,
-        4.89407487e-03,
+    water_precorrection: Tuple[float, ...] = (
+        -0.9091541673536199,
+        0.7603333979595845,
+        0.3297069029031263,
+        -0.151236295914714,
+        0.0334660134162732,
+        -0.0025430949482085907,
     )
 
 
@@ -66,9 +67,9 @@ class DefaultMCSimulationParameters:
     # some geometrical corrections to match RTK/MC-GPU geometry
     geometrical_corrections: dict = field(
         default_factory=lambda: {
-            "offset_x": -0.4276477849036505,
+            "offset_x": -0.5030858965528291,
             "offset_y": -3.749082176733503,
-            "offset_z": -0.32871583164473445,
+            "offset_z": -0.29206039325204886,
             "source_to_detector_distance_offset": 0.13054052787167872,
             "source_to_isocenter_distance_offset": 3.2595168038949205,
         }

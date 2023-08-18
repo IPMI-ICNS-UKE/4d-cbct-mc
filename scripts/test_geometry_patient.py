@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
     init_fancy_logging()
 
-    N_PROJECTIONS = 16
+    N_PROJECTIONS = 32
 
     CONFIGS = {
         "high": {
@@ -34,10 +34,10 @@ if __name__ == "__main__":
 
     # device ID: runs
     RUNS = {
-        1: ("high",),
+        0: ("high",),
     }
 
-    GPU = 1
+    GPU = 0
 
     output_folder = Path("/datalake_fast/mc_test/mc_output/geometry_test")
 
@@ -67,13 +67,28 @@ if __name__ == "__main__":
     #     "source_to_isocenter_distance_offset": 4.3951556461792665,
     # }
 
+    # calibrations = {
+    #     "offset_x": 0.45619947910024583,
+    #     "offset_y": -3.9406363975565473,
+    #     "offset_z": -0.3298962266563392,
+    #     "source_to_detector_distance_offset": 1.4269519273107474,
+    #     "source_to_isocenter_distance_offset": 4.3951556461792665,
+    # }
+
     calibrations = {
-        "offset_x": 0.45619947910024583,
-        "offset_y": -3.9406363975565473,
-        "offset_z": -0.3298962266563392,
-        "source_to_detector_distance_offset": 1.4269519273107474,
-        "source_to_isocenter_distance_offset": 4.3951556461792665,
+        "offset_x": -0.5030858965528291,
+        "offset_y": -3.749082176733503,
+        "offset_z": -0.29206039325204886,
+        "source_to_detector_distance_offset": 0.13054052787167872,
+        "source_to_isocenter_distance_offset": 3.2595168038949205,
     }
+    # calibrations = {
+    #     "offset_x": -0.5,
+    #     "offset_y": -0.5,
+    #     "offset_z": -0.5,
+    #     "source_to_detector_distance_offset": 0,
+    #     "source_to_isocenter_distance_offset": 0,
+    # }
     patient_folder = Path(
         "/datalake_fast/4d_ct_lung_uke_artifact_free/022_4DCT_Lunge_amplitudebased_complete"
     )
@@ -137,16 +152,16 @@ if __name__ == "__main__":
             run_air_simulation=True,
             clean=True,
             gpu_id=GPU,
-            # source_position_offset=(
-            #     calibrations["offset_x"],
-            #     calibrations["offset_y"],
-            #     calibrations["offset_z"],
-            # ),
-            # source_to_isocenter_distance_offset=calibrations[
-            #     "source_to_isocenter_distance_offset"
-            # ],
-            # source_to_detector_distance_offset=calibrations[
-            #     "source_to_detector_distance_offset"
-            # ],
+            source_position_offset=(
+                calibrations["offset_x"],
+                calibrations["offset_y"],
+                calibrations["offset_z"],
+            ),
+            source_to_isocenter_distance_offset=calibrations[
+                "source_to_isocenter_distance_offset"
+            ],
+            source_to_detector_distance_offset=calibrations[
+                "source_to_detector_distance_offset"
+            ],
             force_rerun=True,
         )

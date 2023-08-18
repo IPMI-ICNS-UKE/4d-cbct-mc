@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from pprint import pprint
 
 import itk
 import matplotlib.pyplot as plt
@@ -19,6 +20,7 @@ from cbctmc.forward_projection import (
 )
 from cbctmc.mc.geometry import MCCatPhan604Geometry, MCWaterPhantomGeometry
 from cbctmc.mc.materials import MATERIALS_125KEV
+from cbctmc.mc.reference import REFERENCE_MU, REFERENCE_MU_VARIAN
 from cbctmc.mc.simulation import MCSimulation
 from cbctmc.reconstruction.reconstruction import reconstruct_3d
 
@@ -38,11 +40,13 @@ if __name__ == "__main__":
     init_fancy_logging()
 
     N_PROJECTIONS = DefaultMCSimulationParameters.n_projections
-    N_AVERAGE_SLICES: int = 50
+    N_AVERAGE_SLICES: int = 20
     IMAGE_SHAPE = (464, 464, 250)
-    EDGE_EROSION_KERNEL_SIZE: int = 8
+    EDGE_EROSION_KERNEL_SIZE: int = 0
     HIGHEST_ORDER = 5
-    PLOT_DEBUG: bool = False
+    IGNORE_AIR = True
+    PLOT_DEBUG: bool = True
+    FORCE_RERUN: bool = False
 
     # cf. Chantler: https://www.nist.gov/pml/x-ray-form-factor-attenuation-and-scattering-tables
     # mean energy of used spectrum is 63.140 keV
@@ -63,27 +67,20 @@ if __name__ == "__main__":
     # device ID: runs
     RUNS = {0: "high"}
 
-    calibrations = {
-        "offset_x": -0.5030858965528291,
-        "offset_y": -3.749082176733503,
-        "offset_z": -0.29206039325204886,
-        "source_to_detector_distance_offset": 0.13054052787167872,
-        "source_to_isocenter_distance_offset": 3.2595168038949205,
-    }
-
     GPU = 0
     run = RUNS[GPU]
 
-    output_folder = Path("/datalake_fast/mc_test/mc_output/fit_wpc")
+    output_folder = Path("/datalake_fast/mc_test/mc_output/fit_wpc_catphan")
 
     output_folder.mkdir(parents=True, exist_ok=True)
     # run_folder = f"run_{datetime.now().isoformat()}"
-    # run_folder = "run_2023-07-06T17:10:25.950188"
-    run_folder = "run_2023-07-11T16:45:12.198483"
+
+    run_folder = "run_2023-07-12T19:44:28.433817"
     (output_folder / run_folder).mkdir(exist_ok=True)
 
     # MC simulate Cat Phan 604 if not already simulated
-    phantom = MCWaterPhantomGeometry(shape=IMAGE_SHAPE)
+    phantom = MCCatPhan604Geometry(shape=IMAGE_SHAPE, reference_mu=REFERENCE_MU_VARIAN)
+
     if not any((output_folder / run_folder).iterdir()):
         phantom.save_material_segmentation(
             output_folder / run_folder / "water_phantom_materials.nii.gz"
@@ -99,17 +96,17 @@ if __name__ == "__main__":
             output_value_range=None,
         )
 
-        fp_geometry = create_geometry(start_angle=90, n_projections=N_PROJECTIONS)
-        forward_projection = project_forward(
-            image,
-            geometry=fp_geometry,
-        )
-        save_geometry(fp_geometry, output_folder / run_folder / "geometry.xml")
-
-        itk.imwrite(
-            forward_projection,
-            str(output_folder / run_folder / "density_fp.mha"),
-        )
+        # fp_geometry = create_geometry(start_angle=90, n_projections=N_PROJECTIONS)
+        # forward_projection = project_forward(
+        #     image,
+        #     geometry=fp_geometry,
+        # )
+        # save_geometry(fp_geometry, output_folder / run_folder / "geometry.xml")
+        #
+        # itk.imwrite(
+        #     forward_projection,
+        #     str(output_folder / run_folder / "density_fp.mha"),
+        # )
 
         simulation_config = CONFIGS[run]
 
@@ -129,9 +126,12 @@ if __name__ == "__main__":
 
         for n in range(HIGHEST_ORDER + 1):
             # calculate q^n projections and reconstruct f_n images (if not exist)
-            if not (
-                output_folder / run_folder / "reconstructions" / f"recon_f_{n}.mha"
-            ).exists():
+            if (
+                not (
+                    output_folder / run_folder / "reconstructions" / f"recon_f_{n}.mha"
+                ).exists()
+                or FORCE_RERUN
+            ):
                 normalized_projections = sitk.ReadImage(
                     str(output_folder / run_folder / "projections_total_normalized.mha")
                 )
@@ -167,17 +167,13 @@ if __name__ == "__main__":
         n_air_voxels = air_mask.sum()
         n_water_voxels = water_mask.sum()
 
-        weight_image = np.zeros_like(phantom.densities, dtype=np.float32)
-        weight_image[
-            water_mask
-        ] = 1  # 10*n_water_voxels / (n_air_voxels + n_water_voxels)
+        weight_image = np.ones_like(phantom.densities, dtype=np.float32)
 
-        if EDGE_EROSION_KERNEL_SIZE:
-            # binary erosion to exclude edge effects
-            weight_image = binary_erosion(
-                weight_image, structure=np.ones((EDGE_EROSION_KERNEL_SIZE,) * 3)
-            ).astype(weight_image.dtype)
-        weight_image[air_mask] = 1  # n_air_voxels / (n_air_voxels + n_water_voxels)
+        # if EDGE_EROSION_KERNEL_SIZE:
+        #     # binary erosion to exclude edge effects
+        #     weight_image = binary_erosion(
+        #         weight_image, structure=np.ones((EDGE_EROSION_KERNEL_SIZE,) * 3)
+        #     ).astype(weight_image.dtype)
 
         # finally restrict weight image to FOV
         # (circular FOV in x-y and central z-range used for averaging)
@@ -188,6 +184,28 @@ if __name__ == "__main__":
             height=N_AVERAGE_SLICES,
         )
         weight_image = fov * weight_image
+        # same weighting for every material ROI
+        materials = (
+            "air",
+            "h2o",
+            "pmp",
+            "ldpe",
+            "polystyrene",
+            "bone_020",
+            "acrylic",
+            "bone_050",
+            "delrin",
+            "teflon",
+        )
+        for material in materials:
+            mask = phantom.materials == MATERIALS_125KEV[material].number
+            mask &= fov
+
+            if IGNORE_AIR and material == "air":
+                # ignore air
+                weight_image[mask] = 0.0
+            else:
+                weight_image[mask] = 1.0 / mask.sum()
 
         sitk.WriteImage(
             phantom._array_to_itk(weight_image),
@@ -195,11 +213,7 @@ if __name__ == "__main__":
         )
 
         # create the template image, i.e. phantom with reference mu values
-        template_image = np.zeros_like(phantom.densities, dtype=np.float32)
-
-        template_image[water_mask] = MU_WATER
-        template_image[air_mask] = MU_AIR
-
+        template_image = phantom.mus
         mid_z_slice = IMAGE_SHAPE[-1] // 2
 
         if PLOT_DEBUG:
@@ -264,3 +278,129 @@ if __name__ == "__main__":
         print(f"rel. difference for water before WPC: {rel_diff_before}")
         print(f"rel. difference for water after WPC: {rel_diff_after}")
         print(f"WPC coefficients: {c.tolist()}")
+
+        # reconstruct MC simulation
+        if (
+            not (output_folder / run_folder / "reconstructions" / "fdk3d.mha").exists()
+            or FORCE_RERUN
+        ):
+            reconstruct_3d(
+                projections_filepath=output_folder
+                / run_folder
+                / "projections_total_normalized.mha",
+                geometry_filepath=output_folder / run_folder / "geometry.xml",
+                output_folder=output_folder / run_folder / "reconstructions",
+                output_filename="fdk3d.mha",
+                dimension=(464, 250, 464),
+                water_pre_correction=None,
+            )
+        reconstruct_3d(
+            projections_filepath=output_folder
+            / run_folder
+            / "projections_total_normalized.mha",
+            geometry_filepath=output_folder / run_folder / "geometry.xml",
+            output_folder=output_folder / run_folder / "reconstructions",
+            output_filename="fdk3d_wpc.mha",
+            dimension=(464, 250, 464),
+            water_pre_correction=c.tolist(),
+        )
+
+    reference_recon = sitk.ReadImage(
+        "/datalake/4d_cbct_mc/CatPhantom/raw_data/2022-12-01_142914/catphan604_varian_registered.mha"
+    )
+    reference_recon = sitk.GetArrayFromImage(reference_recon)
+    reference_recon = np.moveaxis(reference_recon, 1, -1)
+    reference_recon = np.rot90(reference_recon, k=-1, axes=(0, 1))
+
+    materials = (
+        "air_1",
+        "air_2",
+        "pmp",
+        "ldpe",
+        "polystyrene",
+        "bone_020",
+        "acrylic",
+        "bone_050",
+        "delrin",
+        "teflon",
+    )
+
+    reference_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
+        reference_recon, height_margin=1, radius_margin=1
+    )
+
+    mean_mu_reference = [
+        reference_roi_stats[material_name]["mean"] for material_name in materials
+    ]
+
+    mu_fig, mu_ax = plt.subplots()
+    mu_ax.scatter(materials, mean_mu_reference, label="reference")
+
+    for recon_name in ("fdk3d", "fdk3d_wpc"):
+        mc_recon = sitk.ReadImage(
+            str(output_folder / run_folder / "reconstructions" / f"{recon_name}.mha")
+        )
+        mc_recon = sitk.GetArrayFromImage(mc_recon)
+
+        mc_recon = np.moveaxis(mc_recon, 1, -1)
+        mc_recon = np.rot90(mc_recon, k=-1, axes=(0, 1))
+
+        mid_z_slice = phantom.image_shape[2] // 2
+        fig, ax = plt.subplots(1, 3, sharex=True, sharey=True)
+        ax[0].imshow(phantom.mus[..., mid_z_slice], clim=(0, 0.04))
+        ax[1].imshow(mc_recon[..., mid_z_slice], clim=(0, 0.04))
+        ax[2].imshow(reference_recon[..., mid_z_slice], clim=(0, 0.04))
+        ax[1].set_title(f"MC {recon_name}")
+        ax[2].set_title(f"reference (Varian)")
+
+        mc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
+            mc_recon, height_margin=1, radius_margin=1
+        )
+
+        print(f"MC {recon_name}")
+        pprint(mc_roi_stats)
+
+        mean_mu_mc = [
+            mc_roi_stats[material_name]["mean"] for material_name in materials
+        ]
+
+        mu_ax.scatter(materials, mean_mu_mc, label=f"MC {recon_name}")
+
+    mu_ax.legend()
+
+    pysical_reference = dict(REFERENCE_MU)
+    pysical_reference["air_1"] = pysical_reference["air"]
+    pysical_reference["air_2"] = pysical_reference["air"]
+    del pysical_reference["air"]
+
+    # reference_recon = sitk.ReadImage(
+    #     "/datalake/4d_cbct_mc/CatPhantom/raw_data/2022-12-01_142914/catphan604_varian_registered.mha"
+    # )
+    # reference_recon = sitk.GetArrayFromImage(reference_recon)
+    # reference_recon = np.moveaxis(reference_recon, 1, -1)
+    # reference_recon = np.rot90(reference_recon, k=-1, axes=(0, 1))
+    #
+    # materials = (
+    #     "air_1",
+    #     "air_2",
+    #     "pmp",
+    #     "ldpe",
+    #     "polystyrene",
+    #     "bone_020",
+    #     "acrylic",
+    #     "bone_050",
+    #     "delrin",
+    #     "teflon",
+    # )
+    #
+    # reference_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
+    #     reference_recon, height_margin=10, radius_margin=3
+    # )
+    #
+    # mc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
+    #     f_n_images[1], height_margin=10, radius_margin=3
+    # )
+    #
+    # mc_wpc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
+    #     wpc_image, height_margin=10, radius_margin=3
+    # )

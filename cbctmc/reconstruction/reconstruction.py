@@ -40,7 +40,7 @@ def reconstruct_3d(
     if not output_folder:
         output_folder = projections_filepath.parent / "reconstruction"
     if not output_filename:
-        output_filename = (f"recon_{method}.mha",)
+        output_filename = f"recon_{method}.mha"
 
     output_folder.mkdir(parents=True, exist_ok=True)
 
@@ -63,5 +63,5 @@ def reconstruct_3d(
     )
     reconstructor.reconstruct(**fdk_params)
 
-    with open(output_folder / f"params_{method}.yaml", "w") as f:
+    with open((output_folder / output_filename).with_suffix(".yaml"), "w") as f:
         yaml.dump(fdk_params, f)
