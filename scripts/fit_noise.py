@@ -31,7 +31,19 @@ from cbctmc.reconstruction.reconstruction import reconstruct_3d
     default=0,
 )
 @click.option("--n-projections", default=DefaultVarianScanParameters.n_projections)
-def run(output_folder: Path, n_projections: int, gpu: int):
+@click.option(
+    "--loglevel",
+    type=click.Choice(["debug", "info", "warning", "error", "critical"]),
+    default="debug",
+)
+def run(output_folder: Path, n_projections: int, gpu: int, loglevel: str):
+    # set up logging
+    loglevel = getattr(logging, loglevel.upper())
+    logging.getLogger("cbctmc").setLevel(loglevel)
+    logger = logging.getLogger(__name__)
+    logger.setLevel(loglevel)
+    init_fancy_logging()
+
     if not output_folder.exists():
         # create output folder
         output_folder.mkdir(parents=True, exist_ok=True)
@@ -139,10 +151,4 @@ def run(output_folder: Path, n_projections: int, gpu: int):
 
 
 if __name__ == "__main__":
-    logging.getLogger("cbctmc").setLevel(logging.INFO)
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-
-    init_fancy_logging()
-
     run()
