@@ -18,6 +18,7 @@ from jinja2 import Environment, FileSystemLoader
 from cbctmc.common_types import FloatTuple3D, PathLike
 from cbctmc.mc.dataio import save_text_file
 from cbctmc.mc.materials import MATERIALS_125KEV, Material
+from cbctmc.mc.reference import REFERENCE_MU
 from cbctmc.mc.voxel_data import compile_voxel_data_string
 from cbctmc.segmentation.labels import get_label_index
 from cbctmc.segmentation.segmenter import MCSegmenter
@@ -295,6 +296,7 @@ class MCGeometry:
         self,
         materials: np.ndarray,
         densities: np.ndarray,
+        mus: np.ndarray | None = None,
         image_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
         image_direction: Tuple[float, ...] | None = None,
         image_origin: Tuple[float, float, float] | None = None,
@@ -306,6 +308,7 @@ class MCGeometry:
 
         self.materials = materials
         self.densities = densities
+        self.mus = mus
 
         self.image_spacing = image_spacing
         if not image_direction:
@@ -650,12 +653,17 @@ class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
         self,
         shape: Tuple[int, int, int] = (500, 500, 500),
         image_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+        reference_mu: dict[str, float] | None = None,
     ):
         phantom_center = np.array(shape) / 2
 
         air_material = MATERIALS_125KEV["air"]
         materials = np.full(shape, fill_value=air_material.number, dtype=np.uint8)
         densities = np.full(shape, fill_value=air_material.density, dtype=np.float32)
+        if not reference_mu:
+            reference_mu = REFERENCE_MU
+
+        mus = np.full(shape, fill_value=reference_mu["air"], dtype=np.float32)
 
         for roi_group in (
             MCCatPhan604Geometry.PHANTOM_BODY,
@@ -678,9 +686,52 @@ class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
                 materials[roi_mask] = roi["material"].number
                 densities[roi_mask] = roi["material"].density
 
+                mus[roi_mask] = reference_mu[roi["material"].identifier]
+
         super().__init__(
-            materials=materials, densities=densities, image_spacing=image_spacing
+            materials=materials,
+            densities=densities,
+            mus=mus,
+            image_spacing=image_spacing,
         )
+
+    @staticmethod
+    def calculate_roi_statistics(
+        image: np.ndarray, radius_margin: float = 1.0, height_margin: float = 1.0
+    ):
+        phantom_center = np.array(image.shape) / 2
+
+        results = {}
+
+        for roi_name, roi in MCCatPhan604Geometry.SENSITOMETRY_ROIS.items():
+            # convert to rad
+            phi = roi["angle"] * np.pi / 180.0
+            roi_center = np.array([np.cos(phi), -np.sin(phi), 0.0])
+            roi_center = (roi_center * roi["distance"]) + phantom_center
+
+            roi_mask = MCCatPhan604Geometry.cylindrical_mask(
+                shape=image.shape,
+                center=roi_center,
+                radius=roi["radius"] - radius_margin,
+                height=roi["length"] - 2 * height_margin,
+            )
+
+            roi = image[roi_mask]
+
+            stats = {
+                "min": np.min(roi),
+                "max": np.max(roi),
+                "mean": np.mean(roi),
+                "p25": np.percentile(roi, 25),
+                "p50": np.percentile(roi, 50),
+                "p75": np.percentile(roi, 75),
+                "std": np.std(roi),
+                "evaluated_voxels": roi.size,
+            }
+
+            results[roi_name] = stats
+
+        return results
 
 
 class MCWaterPhantomGeometry(MCGeometry, CylindricalPhantomMixin):

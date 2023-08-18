@@ -152,11 +152,11 @@ if __name__ == "__main__":
     forward_projection = itk.array_from_image(forward_projection)
 
     parametrization = ng.p.Instrumentation(
-        offset_x=ng.p.Scalar(lower=-4, upper=4),
-        offset_y=ng.p.Scalar(lower=-4, upper=4),
-        offset_z=ng.p.Scalar(lower=-4, upper=4),
-        source_to_detector_distance_offset=ng.p.Scalar(lower=-10, upper=10),
-        source_to_isocenter_distance_offset=ng.p.Scalar(lower=-10, upper=10),
+        offset_x=ng.p.Scalar(lower=-1, upper=1),
+        offset_y=ng.p.Scalar(lower=-1, upper=1),
+        offset_z=ng.p.Scalar(lower=-1, upper=1),
+        # source_to_detector_distance_offset=ng.p.Scalar(lower=-0, upper=0),
+        # source_to_isocenter_distance_offset=ng.p.Scalar(lower=-0, upper=0),
     )
 
     optimizer_class = ng.optimizers.registry["TwoPointsDE"]
@@ -170,8 +170,8 @@ if __name__ == "__main__":
         offset_x=0.0,
         offset_y=0.0,
         offset_z=0.0,
-        source_to_detector_distance_offset=0.0,
-        source_to_isocenter_distance_offset=0.0,
+        # source_to_detector_distance_offset=0.0,
+        # source_to_isocenter_distance_offset=0.0,
     )
 
     for run in RUNS[GPU]:
@@ -199,12 +199,12 @@ if __name__ == "__main__":
                     params.kwargs["offset_y"],
                     params.kwargs["offset_z"],
                 ),
-                source_to_detector_distance_offset=params.kwargs[
-                    "source_to_detector_distance_offset"
-                ],
-                source_to_isocenter_distance_offset=params.kwargs[
-                    "source_to_isocenter_distance_offset"
-                ],
+                # source_to_detector_distance_offset=params.kwargs[
+                #     "source_to_detector_distance_offset"
+                # ],
+                # source_to_isocenter_distance_offset=params.kwargs[
+                #     "source_to_isocenter_distance_offset"
+                # ],
             )
 
             mc_projections = sitk.ReadImage(
@@ -218,3 +218,5 @@ if __name__ == "__main__":
 
             logger.info(f"Result for {params.kwargs}: {ncc=}")
             logger.info(f"Current recommendation: {optimizer.recommend()}")
+
+    optimizer.dump("/home/fmadesta/research/4d-cbct-mc/optimizer_1x1x1_pat_90deg.pkl")
