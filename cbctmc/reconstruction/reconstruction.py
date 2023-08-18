@@ -44,7 +44,7 @@ def reconstruct_3d(
 
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    reconstructor = FDKReconstructor(use_docker=True, gpu_id=gpu_id)
+    reconstructor = FDKReconstructor(use_docker=True)
 
     fdk_params = dict(
         path=projections_filepath.parent,

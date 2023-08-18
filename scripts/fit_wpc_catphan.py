@@ -116,7 +116,7 @@ if __name__ == "__main__":
             run_air_simulation=True,
             clean=True,
             gpu_id=GPU,
-            **DefaultMCSimulationParameters.geometrical_corrections,
+            **DefaultMCSimulationParameters().geometrical_corrections,
             force_rerun=True,
         )
 

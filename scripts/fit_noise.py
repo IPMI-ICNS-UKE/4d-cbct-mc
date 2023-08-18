@@ -19,7 +19,7 @@ from cbctmc.forward_projection import (
     save_geometry,
 )
 from cbctmc.mc.geometry import MCCatPhan604Geometry
-from cbctmc.mc.reference import REFERENCE_MU
+from cbctmc.mc.reference import REFERENCE_MU, REFERENCE_ROI_STATS_CATPHAN604_VARIAN
 from cbctmc.mc.simulation import MCSimulation
 from cbctmc.reconstruction.reconstruction import reconstruct_3d
 
@@ -30,10 +30,10 @@ if __name__ == "__main__":
 
     init_fancy_logging()
 
-    N_PROJECTIONS = DefaultVarianScanParameters.n_projections
+    N_PROJECTIONS = 60  # DefaultVarianScanParameters.n_projections
     FORCE_RERUN: bool = True
 
-    for n_histories in [int(2.4e9)]:
+    for n_histories in [int(2.4e8)]:
         CONFIGS = {
             "high": {
                 "n_histories": n_histories,
@@ -48,11 +48,11 @@ if __name__ == "__main__":
         GPU = 0
         run = RUNS[GPU]
 
-        output_folder = Path("/datalake_fast/mc_test/mc_output/fit_noise")
+        output_folder = Path("/home/crohling/Documents/fit_noise")
 
         output_folder.mkdir(parents=True, exist_ok=True)
         run_folder = f"run_{datetime.now().isoformat()}"
-        run_folder = "run_2023-07-13T00:40:34.399836"
+
         (output_folder / run_folder).mkdir(exist_ok=True)
 
         # # MC simulate Cat Phan 604
@@ -73,17 +73,7 @@ if __name__ == "__main__":
             )
 
             fp_geometry = create_geometry(start_angle=90, n_projections=N_PROJECTIONS)
-            forward_projection = project_forward(
-                image,
-                geometry=fp_geometry,
-            )
             save_geometry(fp_geometry, output_folder / run_folder / "geometry.xml")
-
-            itk.imwrite(
-                forward_projection,
-                str(output_folder / run_folder / "density_fp.mha"),
-            )
-
             simulation_config = CONFIGS[run]
 
             simulation = MCSimulation(geometry=phantom, **simulation_config)
@@ -92,7 +82,7 @@ if __name__ == "__main__":
                 run_air_simulation=True,
                 clean=True,
                 gpu_id=GPU,
-                **MCDefaults.geometrical_corrections,
+                **MCDefaults().geometrical_corrections,
                 force_rerun=True,
             )
 
@@ -129,13 +119,6 @@ if __name__ == "__main__":
             ],
         )
 
-    reference_recon = sitk.ReadImage(
-        "/datalake/4d_cbct_mc/CatPhantom/raw_data/2022-12-01_142914/catphan604_varian_registered.mha"
-    )
-    reference_recon = sitk.GetArrayFromImage(reference_recon)
-    reference_recon = np.moveaxis(reference_recon, 1, -1)
-    reference_recon = np.rot90(reference_recon, k=-1, axes=(0, 1))
-
     materials = (
         "air_1",
         "air_2",
@@ -149,9 +132,7 @@ if __name__ == "__main__":
         "teflon",
     )
 
-    reference_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
-        reference_recon, height_margin=3, radius_margin=3
-    )
+    reference_roi_stats = REFERENCE_ROI_STATS_CATPHAN604_VARIAN
 
     mean_mu_reference = [
         reference_roi_stats[material_name]["mean"] for material_name in materials
@@ -170,12 +151,10 @@ if __name__ == "__main__":
         mc_recon = np.rot90(mc_recon, k=-1, axes=(0, 1))
 
         mid_z_slice = phantom.image_shape[2] // 2
-        fig, ax = plt.subplots(1, 3, sharex=True, sharey=True)
+        fig, ax = plt.subplots(1, 2, sharex=True, sharey=True)
         ax[0].imshow(phantom.mus[..., mid_z_slice], clim=(0, 0.04))
         ax[1].imshow(mc_recon[..., mid_z_slice], clim=(0, 0.04))
-        ax[2].imshow(reference_recon[..., mid_z_slice], clim=(0, 0.04))
         ax[1].set_title(f"MC {recon_name}")
-        ax[2].set_title(f"reference")
 
         mc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
             mc_recon, height_margin=10, radius_margin=3
