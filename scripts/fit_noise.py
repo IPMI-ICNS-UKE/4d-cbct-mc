@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from pprint import pprint
 
-import itk
+import click
 import matplotlib.pyplot as plt
 import numpy as np
 import SimpleITK as sitk
@@ -12,43 +12,36 @@ from ipmi.common.logger import init_fancy_logging
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 from cbctmc.defaults import DefaultVarianScanParameters
-from cbctmc.forward_projection import (
-    create_geometry,
-    prepare_image_for_rtk,
-    project_forward,
-    save_geometry,
-)
+from cbctmc.forward_projection import create_geometry, save_geometry
 from cbctmc.mc.geometry import MCCatPhan604Geometry
-from cbctmc.mc.reference import REFERENCE_MU, REFERENCE_ROI_STATS_CATPHAN604_VARIAN
+from cbctmc.mc.reference import REFERENCE_ROI_STATS_CATPHAN604_VARIAN
 from cbctmc.mc.simulation import MCSimulation
 from cbctmc.reconstruction.reconstruction import reconstruct_3d
 
-if __name__ == "__main__":
-    logging.getLogger("cbctmc").setLevel(logging.INFO)
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
 
-    init_fancy_logging()
-
-    N_PROJECTIONS = 60  # DefaultVarianScanParameters.n_projections
-    FORCE_RERUN: bool = True
+@click.command()
+@click.option(
+    "--output-folder",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=Path("."),
+)
+@click.option(
+    "--gpu",
+    type=int,
+    default=0,
+)
+@click.option("--n-projections", default=DefaultVarianScanParameters.n_projections)
+def run(output_folder: Path, n_projections: int, gpu: int):
+    if not output_folder.exists():
+        # create output folder
+        output_folder.mkdir(parents=True, exist_ok=True)
 
     for n_histories in [int(2.4e8)]:
-        CONFIGS = {
-            "high": {
-                "n_histories": n_histories,
-                "n_projections": N_PROJECTIONS,
-                "angle_between_projections": 360.0 / N_PROJECTIONS,
-            },
+        simulation_config = {
+            "n_histories": n_histories,
+            "n_projections": n_projections,
+            "angle_between_projections": 360.0 / n_projections,
         }
-
-        # device ID: runs
-        RUNS = {0: "high"}
-
-        GPU = 0
-        run = RUNS[GPU]
-
-        output_folder = Path("/home/crohling/Documents/fit_noise")
 
         output_folder.mkdir(parents=True, exist_ok=True)
         run_folder = f"run_{datetime.now().isoformat()}"
@@ -65,42 +58,30 @@ if __name__ == "__main__":
                 output_folder / run_folder / "catphan_604_densities.nii.gz"
             )
 
-            image = prepare_image_for_rtk(
-                image=phantom.densities,
-                image_spacing=phantom.image_spacing,
-                input_value_range=None,
-                output_value_range=None,
-            )
-
-            fp_geometry = create_geometry(start_angle=90, n_projections=N_PROJECTIONS)
+            fp_geometry = create_geometry(start_angle=90, n_projections=n_projections)
             save_geometry(fp_geometry, output_folder / run_folder / "geometry.xml")
-            simulation_config = CONFIGS[run]
 
             simulation = MCSimulation(geometry=phantom, **simulation_config)
             simulation.run_simulation(
                 output_folder / run_folder,
                 run_air_simulation=True,
                 clean=True,
-                gpu_id=GPU,
+                gpu_id=gpu,
                 **MCDefaults().geometrical_corrections,
                 force_rerun=True,
             )
 
         # reconstruct MC simulation
-        if (
-            not (output_folder / run_folder / "reconstructions" / "fdk3d.mha").exists()
-            or FORCE_RERUN
-        ):
-            reconstruct_3d(
-                projections_filepath=output_folder
-                / run_folder
-                / "projections_total_normalized.mha",
-                geometry_filepath=output_folder / run_folder / "geometry.xml",
-                output_folder=output_folder / run_folder / "reconstructions",
-                output_filename="fdk3d.mha",
-                dimension=(464, 250, 464),
-                water_pre_correction=None,
-            )
+        reconstruct_3d(
+            projections_filepath=output_folder
+            / run_folder
+            / "projections_total_normalized.mha",
+            geometry_filepath=output_folder / run_folder / "geometry.xml",
+            output_folder=output_folder / run_folder / "reconstructions",
+            output_filename="fdk3d.mha",
+            dimension=(464, 250, 464),
+            water_pre_correction=None,
+        )
         reconstruct_3d(
             projections_filepath=output_folder
             / run_folder
@@ -109,14 +90,7 @@ if __name__ == "__main__":
             output_folder=output_folder / run_folder / "reconstructions",
             output_filename="fdk3d_wpc.mha",
             dimension=(464, 250, 464),
-            water_pre_correction=[
-                3.655898840079317,
-                1.3968539125926327,
-                -0.9713710009818897,
-                0.6286639358149841,
-                -0.16873359741293825,
-                0.016437618457075587,
-            ],
+            water_pre_correction=ReconDefaults.wpc_catphan604,
         )
 
     materials = (
@@ -163,20 +137,12 @@ if __name__ == "__main__":
         print(f"MC {recon_name}")
         pprint(mc_roi_stats)
 
-        mean_mu_mc = [
-            mc_roi_stats[material_name]["mean"] for material_name in materials
-        ]
 
-        mu_ax.scatter(materials, mean_mu_mc, label=f"MC {recon_name}")
+if __name__ == "__main__":
+    logging.getLogger("cbctmc").setLevel(logging.INFO)
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
 
-    pysical_reference = dict(REFERENCE_MU)
-    pysical_reference["air_1"] = pysical_reference["air"]
-    pysical_reference["air_2"] = pysical_reference["air"]
-    del pysical_reference["air"]
-    # mu_ax.scatter(pysical_reference.keys(), pysical_reference.values(), label=f"phys ref")
+    init_fancy_logging()
 
-    mu_ax.legend()
-    # fig, ax = plt.subplots()
-    # ax.plot(reference_recon[..., 87:107].mean(-1)[232], label="reference")
-    # ax.plot(mc_recon[..., 87:107].mean(-1)[232], label="simulation")
-    # ax.legend()
+    run()

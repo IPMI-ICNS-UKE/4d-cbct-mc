@@ -8,6 +8,7 @@ setup(
     entry_points={
         "console_scripts": [
             "run_mc = cbctmc.main:run",
+            "fit-noise = scripts.fit_noise:run",
         ],
     },
     package_data={"cbctmc": ["*.jinja2", "*.mcgpu"]},
