@@ -33,17 +33,15 @@ from cbctmc.reconstruction.reconstruction import reconstruct_3d
 )
 @click.option("--n-projections", default=DefaultVarianScanParameters.n_projections)
 @click.option(
-    "--initial-lower-guess",
-    type=int,
+    "--lower_boundary",
     default=1e8,
 )
 @click.option(
-    "--initial-upper-guess",
-    type=int,
-    default=int(3e9),
+    "--upper_boundary",
+    default=3e9,
 )
 @click.option(
-    "--relative-noise-deviation-threshold",
+    "--threshold",
     type=float,
     default=1,
     help="relative deviation of reference and simulation in percentile which ends the loop"
@@ -200,8 +198,8 @@ def run(
 
         # calculate new n_histories
         if runs >= 1:
-            n_histories = (n_histories_arr[0] + mean_rel_dev_arr[0]*(n_histories_arr[0] - n_histories[-1]) /
-                           (mean_rel_dev_arr[-1] - mean_rel_dev_arr[0]))
+            n_histories = int(n_histories_arr[0] + mean_rel_dev_arr[0]*(n_histories_arr[0] - n_histories[-1]) /
+                              (mean_rel_dev_arr[-1] - mean_rel_dev_arr[0]))
 
         if mean_rel_dev < threshold:
             dev_under_treshold = True
