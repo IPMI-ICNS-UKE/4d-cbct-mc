@@ -91,7 +91,7 @@ def run(
 
         output_folder.mkdir(parents=True, exist_ok=True)
         run_folder = f"run_{n_histories}"
-        if not run_folder.exists():
+        if not (output_folder/run_folder).exists():
             (output_folder / run_folder).mkdir(exist_ok=True)
 
             # # MC simulate Cat Phan 604
