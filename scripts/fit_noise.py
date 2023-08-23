@@ -217,30 +217,5 @@ def run(
         np.save(file, mean_rel_dev_arr)
 
 
-
-def f(x):
-    return 1/x**2*0.09 - 2
-
 if __name__ == "__main__":
-    # run()
-    low = 0.1
-    high = 1000
-    x = 0
-    array_y_low = [f(0.1)]
-    array_x_low = [0.1]
-    array_y_up = [f(100)]
-    array_x_up = [100]
-    for i in range(100):
-
-        x = array_x_low[-1] + array_y_low[-1]*(array_x_low[-1]-array_x_up[-1])/(array_y_up[-1]-array_y_low[-1])
-        if f(x) < 0:
-            array_y_up.append(f(x))
-            array_x_up.append(x)
-        else:
-            array_y_low.append(f(x))
-            array_x_low.append(x)
-        print(x)
-        print(f(x))
-        plt.plot( array_x_low,array_y_low, "bo")
-        plt.plot(array_x_up, array_y_up, "bo")
-        plt.show()
+    run()
