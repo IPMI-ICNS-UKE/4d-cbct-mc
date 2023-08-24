@@ -172,9 +172,9 @@ def run(
 
         print("MC fdk3d_wpc")
         pprint(mc_roi_stats)
-        out_file = open(str(output_folder / run_folder / "reconstructions"
-                            / f"mc_roi_stats_{str(n_histories)}.json"), "w")
-        json.dump(mc_roi_stats, out_file, indent=6)
+        with open(str(output_folder / run_folder / "reconstructions"
+                            / f"mc_roi_stats_{str(n_histories)}.json"), "w") as file:
+            json.dump(mc_roi_stats, file, indent=6)
 
         reference_roi_stats = REFERENCE_ROI_STATS_CATPHAN604_VARIAN
 
@@ -216,4 +216,7 @@ def run(
 
 
 if __name__ == "__main__":
-    run()
+    # run()
+    reference_roi_stats = REFERENCE_ROI_STATS_CATPHAN604_VARIAN
+    with open(str(f"/home/crohling/mc_roi_stats_.json"), "w") as out_file:
+        json.dump(reference_roi_stats, out_file, indent=6)
