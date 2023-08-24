@@ -56,7 +56,8 @@ def run(
     ):
     function = lambda x: calcualteVarDeviation(n_histories=int(x), output_folder=output_folder, gpu=gpu,
                                                n_projections=n_projections, loglevel=loglevel)
-    res = opt.minimize(function, x0=np.array(2.2e9), method="Nelder-Mead", bounds=(lower_boundary, upper_boundary))
+    res = opt.minimize(function, x0=np.array(2.2e9), method="Nelder-Mead",
+                       bounds=[(lower_boundary, upper_boundary)])
     pprint(res.x)
 
 
