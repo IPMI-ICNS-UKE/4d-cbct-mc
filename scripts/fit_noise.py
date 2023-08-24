@@ -91,53 +91,53 @@ def run(
 
         output_folder.mkdir(parents=True, exist_ok=True)
         run_folder = f"run_{n_histories}"
-        if not (output_folder/run_folder).exists():
-            (output_folder / run_folder).mkdir(exist_ok=True)
 
-            # # MC simulate Cat Phan 604
-            phantom = MCCatPhan604Geometry(shape=(464, 464, 250))
-            if not any((output_folder / run_folder).iterdir()):
-                phantom.save_material_segmentation(
-                    output_folder / run_folder / "catphan_604_materials.nii.gz"
-                )
-                phantom.save_density_image(
-                    output_folder / run_folder / "catphan_604_densities.nii.gz"
-                )
+        (output_folder / run_folder).mkdir(exist_ok=True)
 
-                fp_geometry = create_geometry(start_angle=90, n_projections=n_projections)
-                save_geometry(fp_geometry, output_folder / run_folder / "geometry.xml")
-
-                simulation = MCSimulation(geometry=phantom, **simulation_config)
-                simulation.run_simulation(
-                    output_folder / run_folder,
-                    run_air_simulation=True,
-                    clean=True,
-                    gpu_id=gpu,
-                    **MCDefaults().geometrical_corrections,
-                    force_rerun=True,
-                )
-
-            # reconstruct MC simulation
-            # reconstruct_3d(
-            #     projections_filepath=output_folder
-            #     / run_folder
-            #     / "projections_total_normalized.mha",
-            #     geometry_filepath=output_folder / run_folder / "geometry.xml",
-            #     output_folder=output_folder / run_folder / "reconstructions",
-            #     output_filename="fdk3d.mha",
-            #     dimension=(464, 250, 464),
-            #     water_pre_correction=None,
-            # )
-            reconstruct_3d(
-                projections_filepath=output_folder
-                / run_folder
-                / "projections_total_normalized.mha",
-                geometry_filepath=output_folder / run_folder / "geometry.xml",
-                output_folder=output_folder / run_folder / "reconstructions",
-                output_filename="fdk3d_wpc.mha",
-                dimension=(464, 250, 464),
-                water_pre_correction=ReconDefaults.wpc_catphan604,
+        # # MC simulate Cat Phan 604
+        phantom = MCCatPhan604Geometry(shape=(464, 464, 250))
+        if not any((output_folder / run_folder).iterdir()):
+            phantom.save_material_segmentation(
+                output_folder / run_folder / "catphan_604_materials.nii.gz"
             )
+            phantom.save_density_image(
+                output_folder / run_folder / "catphan_604_densities.nii.gz"
+            )
+
+            fp_geometry = create_geometry(start_angle=90, n_projections=n_projections)
+            save_geometry(fp_geometry, output_folder / run_folder / "geometry.xml")
+
+            simulation = MCSimulation(geometry=phantom, **simulation_config)
+            simulation.run_simulation(
+                output_folder / run_folder,
+                run_air_simulation=True,
+                clean=True,
+                gpu_id=gpu,
+                **MCDefaults().geometrical_corrections,
+                force_rerun=True,
+            )
+
+        # reconstruct MC simulation
+        # reconstruct_3d(
+        #     projections_filepath=output_folder
+        #     / run_folder
+        #     / "projections_total_normalized.mha",
+        #     geometry_filepath=output_folder / run_folder / "geometry.xml",
+        #     output_folder=output_folder / run_folder / "reconstructions",
+        #     output_filename="fdk3d.mha",
+        #     dimension=(464, 250, 464),
+        #     water_pre_correction=None,
+        # )
+        reconstruct_3d(
+            projections_filepath=output_folder
+            / run_folder
+            / "projections_total_normalized.mha",
+            geometry_filepath=output_folder / run_folder / "geometry.xml",
+            output_folder=output_folder / run_folder / "reconstructions",
+            output_filename="fdk3d_wpc.mha",
+            dimension=(464, 250, 464),
+            water_pre_correction=ReconDefaults.wpc_catphan604,
+        )
 
         materials = (
             "air_1",
