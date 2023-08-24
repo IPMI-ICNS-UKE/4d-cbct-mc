@@ -216,7 +216,4 @@ def run(
 
 
 if __name__ == "__main__":
-    # run()
-    reference_roi_stats = REFERENCE_ROI_STATS_CATPHAN604_VARIAN
-    with open(str(f"/home/crohling/mc_roi_stats_.json"), "w") as out_file:
-        json.dump(reference_roi_stats, out_file, indent=6)
+    run()
