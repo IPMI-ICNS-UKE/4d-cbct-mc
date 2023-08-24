@@ -719,13 +719,13 @@ class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
             roi = image[roi_mask]
 
             stats = {
-                "min": np.min(roi),
-                "max": np.max(roi),
-                "mean": np.mean(roi),
-                "p25": np.percentile(roi, 25),
-                "p50": np.percentile(roi, 50),
-                "p75": np.percentile(roi, 75),
-                "std": np.std(roi),
+                "min": float(np.min(roi)),
+                "max": float(np.max(roi)),
+                "mean": float(np.mean(roi)),
+                "p25": float(np.percentile(roi, 25)),
+                "p50": float(np.percentile(roi, 50)),
+                "p75": float(np.percentile(roi, 75)),
+                "std": float(np.std(roi)),
                 "evaluated_voxels": roi.size,
             }
 
