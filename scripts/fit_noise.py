@@ -209,9 +209,9 @@ def run(
     n_histories_arr = np.array(n_histories_arr)
     fig, ax = plt.subplots()
     ax.scatter(n_histories_arr, mean_rel_dev_arr)
-    with open(output_folder + "n_histories.npy", 'wb') as file:
+    with open(output_folder / "n_histories.npy", 'wb') as file:
         np.save(file, n_histories_arr)
-    with open(output_folder + "mean_relative_deviation_of_variance.npy", 'wb') as file:
+    with open(output_folder / "mean_relative_deviation_of_variance.npy", 'wb') as file:
         np.save(file, mean_rel_dev_arr)
 
 
