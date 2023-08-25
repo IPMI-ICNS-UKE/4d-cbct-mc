@@ -59,6 +59,7 @@ def run(
     res = opt.minimize(function, x0=np.array(2.2e9), method="Nelder-Mead",
                        bounds=[(lower_boundary, upper_boundary)])
     pprint(res.x)
+    pprint(res)
 
 
 def calcualteVarDeviation(
@@ -191,8 +192,8 @@ def calcualteVarDeviation(
     ax.scatter(materials, std_reference, label="reference")
     ax.scatter(materials, std_mc, label="mc")
     mean_rel_dev = np.mean(rel_dev)
+    pprint(mean_rel_dev)
     return mean_rel_dev
-
 
 
 if __name__ == "__main__":
