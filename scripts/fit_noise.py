@@ -193,7 +193,7 @@ def calcualteVarDeviation(
     ax.scatter(materials, std_mc, label="mc")
     mean_rel_dev = np.mean(rel_dev)
     pprint(mean_rel_dev)
-    return mean_rel_dev
+    return np.abs(mean_rel_dev)
 
 
 if __name__ == "__main__":
