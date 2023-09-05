@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from collections import UserList
 from pathlib import Path
 from typing import List, Sequence, Tuple, Union
+import matplotlib.pyplot as plt
 
 import numpy as np
 import pkg_resources
@@ -647,6 +648,13 @@ class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
             "radius": 6.5,
             "length": 24.0,
         },
+        "water": {
+            "material": MATERIALS_125KEV["h2o"],
+            "angle": 0,
+            "distance": 0,
+            "radius": 30,
+            "length": 40,
+        }
     }
 
     def __init__(
@@ -697,12 +705,10 @@ class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
 
     @staticmethod
     def calculate_roi_statistics(
-        image: np.ndarray, radius_margin: float = 1.0, height_margin: float = 1.0
+        image: np.ndarray, radius_margin: float = 1.0, height_margin: float = 1.0,
     ):
         phantom_center = np.array(image.shape) / 2
-
         results = {}
-
         for roi_name, roi in MCCatPhan604Geometry.SENSITOMETRY_ROIS.items():
             # convert to rad
             phi = roi["angle"] * np.pi / 180.0
@@ -715,9 +721,7 @@ class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
                 radius=roi["radius"] - radius_margin,
                 height=roi["length"] - 2 * height_margin,
             )
-
             roi = image[roi_mask]
-
             stats = {
                 "min": float(np.min(roi)),
                 "max": float(np.max(roi)),
@@ -730,7 +734,6 @@ class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
             }
 
             results[roi_name] = stats
-
         return results
 
 

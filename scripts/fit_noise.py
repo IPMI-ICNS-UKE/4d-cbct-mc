@@ -56,7 +56,7 @@ def run(
     ):
     function = lambda x: calcualteVarDeviation(n_histories=int(x), output_folder=output_folder, gpu=gpu,
                                                n_projections=n_projections, loglevel=loglevel)
-    res = opt.minimize(function, x0=np.array(2.2e9), method="Nelder-Mead",
+    res = opt.minimize(function, x0=np.array(1.98e9), method="Nelder-Mead",
                        bounds=[(lower_boundary, upper_boundary)])
     pprint(res.x)
     pprint(res)
@@ -149,6 +149,7 @@ def calcualteVarDeviation(
         "bone_050",
         "delrin",
         "teflon",
+        "water"
     )
 
     mc_recon = sitk.ReadImage(
@@ -166,7 +167,7 @@ def calcualteVarDeviation(
     ax[1].set_title("MC fdk3d_wpc")
 
     mc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
-        mc_recon, height_margin=10, radius_margin=3
+        mc_recon, height_margin=2, radius_margin=2,
     )
 
     print("MC fdk3d_wpc")
@@ -185,7 +186,7 @@ def calcualteVarDeviation(
     ]
     rel_dev = [
         (mc_roi_stats[material_name]["std"] - reference_roi_stats[material_name]["std"])
-        /mc_roi_stats[material_name]["std"]
+        /reference_roi_stats[material_name]["std"]
         for material_name in materials
     ]
     fig, ax = plt.subplots()
