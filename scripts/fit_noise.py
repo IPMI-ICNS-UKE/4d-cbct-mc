@@ -34,6 +34,11 @@ from cbctmc.reconstruction.reconstruction import reconstruct_3d
 )
 @click.option("--n-projections", default=DefaultVarianScanParameters.n_projections)
 @click.option(
+    "--initial_n_histories",
+    type=int,
+    default=2e9,
+)
+@click.option(
     "--lower_boundary",
     default=1e8,
 )
@@ -55,6 +60,7 @@ def run(
         output_folder: Path,
         gpu: int,
         n_projections: int,
+        initial_n_histories: int,
         lower_boundary: int,
         upper_boundary: int,
         number_runs: int,
@@ -62,7 +68,7 @@ def run(
     ):
     function = lambda x: calcualteVarDeviation(n_histories=int(x), output_folder=output_folder, gpu=gpu,
                                                n_projections=n_projections, number_runs=number_runs, loglevel=loglevel)
-    res = opt.minimize(function, x0=np.array(1.98e9), method="Nelder-Mead",
+    res = opt.minimize(function, x0=np.array(initial_n_histories), method="Nelder-Mead",
                        bounds=[(lower_boundary, upper_boundary)])
     pprint(res.x)
     pprint(res)
