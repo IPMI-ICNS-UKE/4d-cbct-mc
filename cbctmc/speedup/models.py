@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Sequence, Type
+from typing import Literal, Sequence, Type
 
 import torch
 import torch.nn as nn
 
+from cbctmc.speedup import blocks
 from cbctmc.speedup.blocks import (
     ConvInstanceNormMish2D,
     DecoderBlock,
@@ -420,6 +421,125 @@ class FlexUNet(nn.Module):
             return inputs, outputs[-1]
         else:
             return inputs
+
+
+class DenseNet(nn.Module):
+    _LAYERS = {
+        2: {
+            "conv": nn.Conv2d,
+            "residual_dense_block": blocks.ResidualDenseBlock2D,
+            # "convolution_block": blocks.ConvInstanceNormReLU2D,
+            "convolution_block": blocks.ConvInstanceNormMish2D,
+        },
+        3: {
+            "conv": nn.Conv3d,
+            "residual_dense_block": blocks.ResidualDenseBlock3D,
+            # "convolution_block": blocks.ConvInstanceNormReLU3D,
+            "convolution_block": blocks.ConvInstanceNormMish3D,
+        },
+    }
+
+    def __init__(
+        self,
+        n_dims: Literal[2, 3] = 2,
+        in_channels: int = 1,
+        out_channels: int = 1,
+        growth_rate: int = 32,
+        n_blocks: int = 2,
+        n_block_layers: int = 4,
+        local_feature_fusion_channels: int = 32,
+        pre_block_channels: int = 32,
+        post_block_channels: int = 32,
+    ):
+        super().__init__()
+
+        self.n_dims = n_dims
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.growth_rate = growth_rate
+        self.n_blocks = n_blocks
+        self.n_block_layers = n_block_layers
+
+        self.local_feature_fusion_channels = local_feature_fusion_channels
+
+        self.pre_block_channels = pre_block_channels
+        self.post_block_channels = post_block_channels
+
+        # select the rights layers
+        self.residual_dense_block = DenseNet._LAYERS[self.n_dims][
+            "residual_dense_block"
+        ]
+        self.convolution_block = DenseNet._LAYERS[self.n_dims]["convolution_block"]
+        self.conv_layer = DenseNet._LAYERS[self.n_dims]["conv"]
+
+        self.pre_blocks = nn.Sequential(
+            self.convolution_block(
+                in_channels=self.in_channels,
+                out_channels=self.pre_block_channels,
+                kernel_size=(3,) * self.n_dims,
+                padding="same",
+            ),
+            self.convolution_block(
+                in_channels=self.pre_block_channels,
+                out_channels=self.pre_block_channels,
+                kernel_size=(3,) * self.n_dims,
+                padding="same",
+            ),
+        )
+
+        for i_block in range(self.n_blocks):
+            self.add_module(
+                f"residual_dense_block_{i_block}",
+                self.residual_dense_block(
+                    in_channels=self.pre_block_channels
+                    if i_block == 0
+                    else self.local_feature_fusion_channels,
+                    out_channels=self.local_feature_fusion_channels,
+                    growth_rate=self.growth_rate,
+                    n_layers=self.n_block_layers,
+                    convolution_block=self.convolution_block,
+                ),
+            )
+
+        self.global_feature_fuse = self.convolution_block(
+            in_channels=self.pre_block_channels
+            + self.n_blocks * self.local_feature_fusion_channels,
+            out_channels=self.post_block_channels,
+            kernel_size=(1,) * self.n_dims,
+        )
+
+        self.post_blocks = nn.Sequential(
+            self.convolution_block(
+                in_channels=self.post_block_channels,
+                out_channels=self.post_block_channels,
+                kernel_size=(3,) * self.n_dims,
+                padding="same",
+            ),
+            self.conv_layer(
+                in_channels=self.post_block_channels,
+                out_channels=self.out_channels,
+                kernel_size=(3,) * self.n_dims,
+                padding="same",
+            )
+            # no activation function here, i.e. linear activation
+        )
+
+    def forward(self, x):
+        x_out = self.pre_blocks(x)
+
+        block_outputs = [x_out]
+        for i_block in range(self.n_blocks):
+            residual_dense_block = self.get_submodule(f"residual_dense_block_{i_block}")
+
+            x_out = residual_dense_block(x_out)
+            block_outputs.append(x_out)
+
+        x_out = self.global_feature_fuse(torch.cat(block_outputs, dim=1))
+
+        x_out = self.post_blocks(x_out)
+
+        return x_out
 
 
 if __name__ == "__main__":

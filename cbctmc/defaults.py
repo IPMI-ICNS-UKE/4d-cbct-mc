@@ -49,7 +49,8 @@ class DefaultMCSimulationParameters:
         material.filepath for material in MATERIALS_125KEV.values()
     )
 
-    n_histories: int = int(2.4e9)
+    # based on noise fit using A/sqrt(n_historiess) + C and comparison to Varian
+    n_histories: int = 1934000522
     n_projections = DefaultVarianScanParameters.n_projections
     # default 2pi arc for default half-fan mode
     angle_between_projections = 360.0 / n_projections

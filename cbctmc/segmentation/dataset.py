@@ -68,6 +68,12 @@ class LazyLoadableList(MutableSequence):
     def __repr__(self):
         return repr(self.items)
 
+    def __copy__(self):
+        return LazyLoadableList(self.items.copy(), loader=self._loader)
+
+    def copy(self):
+        return self.__copy__()
+
 
 class PickleDataset(Dataset):
     def __init__(self, filepaths: Sequence[PathLike], lz4_compressed: bool = True):
@@ -165,6 +171,8 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
         ]
         | None = None,
         random_rotation: bool = True,
+        add_noise: float = 100.0,
+        shift_image_values: Tuple[float, float] | None = (-0.9, 1.1),
         patches_per_image: int | float = 1,
         force_non_background: bool = False,
         force_balanced_sampling: bool = False,
@@ -186,7 +194,11 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
 
         self.patch_shape = patch_shape
         self.image_spacing_range = image_spacing_range
+        # augmentation
         self.random_rotation = random_rotation
+        self.add_noise = add_noise
+        self.shift_image_values = shift_image_values
+
         self.patches_per_image = patches_per_image
         self.force_non_background = force_non_background
         self.force_balanced_sampling = force_balanced_sampling
@@ -288,6 +300,30 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
         )
 
     @staticmethod
+    def add_noise_to_image(
+        image: np.ndarray, max_noise_std: float = 50.0
+    ) -> np.ndarray:
+        noise_std = np.random.uniform(1, max_noise_std)
+        noise = np.random.normal(loc=0.0, scale=noise_std, size=image.shape)
+        image = image + noise
+
+        logger.debug(f"Added noise to image: {noise_std=}")
+
+        return image
+
+    @staticmethod
+    def add_image_value_shift(
+        image: np.ndarray, shift_relative_range: Tuple[float, float] | None
+    ) -> np.ndarray:
+        if shift_relative_range:
+            shift = np.random.uniform(*shift_relative_range)
+            image = image * shift
+
+            logger.debug(f"Added value shift to image: {shift=}")
+
+        return image
+
+    @staticmethod
     def random_rotate_image_and_segmentation(
         image: np.ndarray,
         segmentation: np.ndarray | None = None,
@@ -297,18 +333,23 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
 
         n_rotations = random.randint(0, 3)
 
-        image = np.rot90(image, k=n_rotations, axes=rotation_plane)
-        if segmentation is not None:
-            segmentation = np.rot90(segmentation, k=n_rotations, axes=rotation_plane)
-
-        if spacing:
-            spacing = list(spacing)
-            if n_rotations % 2:
-                spacing[rotation_plane[0]], spacing[rotation_plane[1]] = (
-                    spacing[rotation_plane[1]],
-                    spacing[rotation_plane[0]],
+        if n_rotations > 0:
+            image = np.rot90(image, k=n_rotations, axes=rotation_plane)
+            if segmentation is not None:
+                segmentation = np.rot90(
+                    segmentation, k=n_rotations, axes=rotation_plane
                 )
-            spacing = tuple(spacing)
+
+            if spacing:
+                spacing = list(spacing)
+                if n_rotations % 2:
+                    spacing[rotation_plane[0]], spacing[rotation_plane[1]] = (
+                        spacing[rotation_plane[1]],
+                        spacing[rotation_plane[0]],
+                    )
+                spacing = tuple(spacing)
+
+            logger.debug(f"Added rotation to image: {n_rotations=}, {rotation_plane=}")
 
         return image, segmentation, spacing
 
@@ -319,8 +360,21 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
             worker_id = worker_info.id
             num_workers = worker_info.num_workers
 
-            self.images.items = self.images.items[worker_id::num_workers]
-            self.segmentations.items = self.segmentations.items[worker_id::num_workers]
+            # do worker subselection for IteratableDataset
+            images = self.images.copy()
+            images.items = images.items[worker_id::num_workers]
+            segmentations = self.segmentations.copy()
+            segmentations.items = segmentations.items[worker_id::num_workers]
+
+            logger.info(
+                f"Dataset length for worker {worker_id+1}/{num_workers}: {len(images)}"
+            )
+
+        else:
+            images = self.images
+            segmentations = self.segmentations
+
+            logger.info(f"Dataset length: {len(images)}")
 
         for (
             image,
@@ -328,10 +382,10 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
             segmentation,
             segmentation_filepath,
         ) in zip(
-            self.images,
-            self.images.items,
-            self.segmentations,
-            self.segmentations.items,
+            images,
+            images.items,
+            segmentations,
+            segmentations.items,
         ):
             if self.image_spacing_range is not None:
                 # resample to random image spacing
@@ -392,12 +446,22 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
 
             # pad if (rotated) image shape < patch shape
             # also performs center cropping if specified
-            image_arr, segmentation_arr = crop_or_pad(
+            image_arr, seg_no_background = crop_or_pad(
                 image=image_arr,
-                mask=segmentation_arr,
+                mask=segmentation_arr[1:],
+                mask_pad_value=0,
                 target_shape=self.patch_shape,
                 no_crop=not self.center_crop,
             )
+            _, background = crop_or_pad(
+                image=None,
+                mask=segmentation_arr[:1],
+                mask_pad_value=1,
+                target_shape=self.patch_shape,
+                no_crop=not self.center_crop,
+            )
+
+            segmentation_arr = np.concatenate([background, seg_no_background], axis=0)
 
             max_iterations = patches_per_image * 10
             i_patch = 0
@@ -406,6 +470,7 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
                 patch_slicing = SegmentationDataset.sample_random_patch_3d(
                     patch_shape=self.patch_shape, image_shape=image_arr.shape
                 )
+                logger.debug(f"Patch slicing: {patch_slicing}")
 
                 # copy for PyTorch (negative strides are not currently supported)
                 image_arr_patch = image_arr[patch_slicing].astype(np.float32, order="C")
@@ -417,18 +482,16 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
                     np.float32, order="C"
                 )
 
-                if self.force_non_background:
-                    if not mask_arr_patch[..., 1:, :, :, :].any():
-                        continue
+                # if self.force_non_background:
+                #     if not mask_arr_patch[..., 1:, :, :, :].any():
+                #         logger.info('Skip patch without non-background labels')
+                #         continue
+                #     else:
+                #         break
 
                 if self.force_balanced_sampling:
                     min_count = min(labels_already_sampled.values())
-                    # sampling_probabilities = np.array(
-                    #     [
-                    #         1 / (count**2 + 1e-6)
-                    #         for count in labels_already_sampled.values()
-                    #     ]
-                    # )
+
                     sampling_probabilities = np.array(
                         [
                             1 if count == min_count else 0
@@ -450,11 +513,24 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
                     )
 
                     if selected_label not in labels_present:
+                        logger.debug(
+                            f"Skip patch without label {LABELS[selected_label]}, "
+                            f"present labels: {labels_present}"
+                        )
                         continue
 
                     for i_label in LABELS.keys():
                         if mask_arr_patch[..., i_label, :, :, :].any():
                             labels_already_sampled[i_label] += 1
+
+                if self.add_noise:
+                    image_arr_patch = SegmentationDataset.add_noise_to_image(
+                        image_arr_patch, max_noise_std=self.add_noise
+                    )
+                if self.shift_image_values:
+                    image_arr_patch = SegmentationDataset.add_image_value_shift(
+                        image_arr_patch, shift_relative_range=self.shift_image_values
+                    )
 
                 image_arr_patch = rescale_range(
                     image_arr_patch,
@@ -491,7 +567,11 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
                 yield data
 
                 i_patch += 1
-                if i_patch + 1 == patches_per_image:
+                logger.debug(
+                    f"Patch {i_patch}/{patches_per_image} for image {image_id}"
+                )
+
+                if i_patch == patches_per_image:
                     break
 
     def compile_and_save(self, folder: PathLike):
@@ -506,3 +586,213 @@ class SegmentationDataset(IterableDataset, DatasetMixin):
 
             with lz4.frame.open(filepath, mode="wb", compression_level=0) as f:
                 pickle.dump(data, f)
+
+
+if __name__ == "__main__":
+    import logging
+    from functools import partial
+    from pathlib import Path
+
+    import torch
+    import torch.nn as nn
+    from ipmi.common.logger import init_fancy_logging
+    from sklearn.model_selection import train_test_split
+    from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
+    from torch.optim import Adam
+    from torch.utils.data import DataLoader
+
+    from cbctmc.segmentation.dataset import PickleDataset, SegmentationDataset
+    from cbctmc.segmentation.labels import LABELS, LABELS_TO_LOAD
+    from cbctmc.segmentation.losses import DiceLoss
+    from cbctmc.segmentation.trainer import CTSegmentationTrainer
+    from cbctmc.speedup.models import FlexUNet
+    from cbctmc.utils import dict_collate
+
+    logging.getLogger("cbctmc").setLevel(logging.DEBUG)
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+
+    init_fancy_logging()
+
+    class SegmentationLoss(nn.Module):
+        def __init__(self, use_dice: bool = True):
+            super().__init__()
+            self.use_dice = use_dice
+            self.ce_loss = CrossEntropyLoss(reduction="none")
+            self.bce_loss = BCEWithLogitsLoss(reduction="none")
+            self.dice_loss_function = DiceLoss(
+                include_background=True, reduction="none"
+            )
+
+        def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            if self.use_dice:
+                input[:, 0:-1] = torch.softmax(input[:, 0:-1], dim=1)  # softmax group 1
+                input[:, -1] = torch.sigmoid(input[:, -1])  # sigmoid for lung vessels
+                loss = self.dice_loss_function(input=input, target=target)
+            else:
+                loss = 8 / 9 * self.ce_loss(
+                    input[:, 0:-1], target[:, 0:-1]
+                ) + 1 / 9 * self.bce_loss(input[:, -1:], target[:, -1:])
+
+            return loss
+
+    # train_filepaths = sorted(
+    #     Path("/datalake2/mc_segmentation_dataset_fixed/train").glob("*")
+    # )
+    # test_filepaths = sorted(
+    #     Path("/datalake2/mc_segmentation_dataset_fixed/test").glob("*")
+    # )
+    #
+    # train_dataset = PickleDataset(filepaths=train_filepaths)
+    # test_dataset = PickleDataset(filepaths=test_filepaths)
+
+    # compile filepaths
+    # LUNA16
+    ROOT_DIR_LUNA16 = Path("/datalake2/luna16/images_nii")
+    IMAGE_FILEPATHS_LUNA16 = sorted(p for p in ROOT_DIR_LUNA16.glob("*.nii"))
+    SEGMENTATION_FILEPATHS_LUNA16 = [
+        {
+            segmentation_name: ROOT_DIR_LUNA16
+            / "predicted_segmentations"
+            / image_filepath.with_suffix("").name
+            / f"{segmentation_name}.nii.gz"
+            for segmentation_name in LABELS_TO_LOAD
+        }
+        for image_filepath in IMAGE_FILEPATHS_LUNA16
+    ]
+
+    # TOTALSEGMENTATOR
+    ROOT_DIR_TOTALSEGMENTATOR = Path("/datalake_fast/totalsegmentator_mc")
+    IMAGE_FILEPATHS_TOTALSEGMENTATOR = sorted(
+        p for p in ROOT_DIR_TOTALSEGMENTATOR.glob("*/ct.nii.gz")
+    )
+    SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR = [
+        {
+            segmentation_name: ROOT_DIR_TOTALSEGMENTATOR
+            / image_filepath.parent.name
+            / "segmentations"
+            / f"{segmentation_name}.nii.gz"
+            for segmentation_name in LABELS_TO_LOAD
+        }
+        for image_filepath in IMAGE_FILEPATHS_TOTALSEGMENTATOR
+    ]
+
+    # INHOUSE
+    patient_ids = [
+        22,
+        24,
+        32,
+        33,
+        68,
+        69,
+        74,
+        78,
+        91,
+        92,
+        104,
+        106,
+        109,
+        115,
+        116,
+        121,
+        124,
+        132,
+        142,
+        145,
+        146,
+    ]
+    train_patients, test_patients = train_test_split(
+        patient_ids, train_size=0.75, random_state=42
+    )
+    ROOT_DIR_INHOUSE = Path("/datalake_fast/4d_ct_lung_uke_artifact_free/")
+
+    PHASES = [0, 5]
+
+    IMAGE_FILEPATHS_INHOUSE_TRAIN = [
+        ROOT_DIR_INHOUSE
+        / f"{patient_id:03d}_4DCT_Lunge_amplitudebased_complete/phase_{i_phase:02d}.nii"
+        for i_phase in PHASES
+        for patient_id in sorted(train_patients)
+    ]
+
+    IMAGE_FILEPATHS_INHOUSE_TEST = [
+        ROOT_DIR_INHOUSE
+        / f"{patient_id:03d}_4DCT_Lunge_amplitudebased_complete/phase_{i_phase:02d}.nii"
+        for i_phase in PHASES
+        for patient_id in sorted(test_patients)
+    ]
+
+    SEGMENTATION_FILEPATHS_INHOUSE_TRAIN = [
+        {
+            segmentation_name: ROOT_DIR_INHOUSE
+            / image_filepath.parent.name
+            / "segmentations"
+            / f"phase_{i_phase:02d}"
+            / f"{segmentation_name}.nii.gz"
+            for segmentation_name in LABELS_TO_LOAD
+        }
+        for i_phase in PHASES
+        for image_filepath in IMAGE_FILEPATHS_INHOUSE_TRAIN
+    ]
+    SEGMENTATION_FILEPATHS_INHOUSE_TEST = [
+        {
+            segmentation_name: ROOT_DIR_INHOUSE
+            / image_filepath.parent.name
+            / "segmentations"
+            / f"phase_{i_phase:02d}"
+            / f"{segmentation_name}.nii.gz"
+            for segmentation_name in LABELS_TO_LOAD
+        }
+        for i_phase in PHASES
+        for image_filepath in IMAGE_FILEPATHS_INHOUSE_TEST
+    ]
+
+    # IMAGE_FILEPATHS_INHOUSE_TRAIN = sorted(
+    #     ROOT_DIR_INHPUSE / f"{patient_id}_4DCT_Lunge_amplitudebased_complete/phase_00.nii"
+    #     for patient_id in train_patients
+    # )
+    # IMAGE_FILEPATHS_INHOUSE_TEST = sorted(
+    #     ROOT_DIR_INHPUSE / f"{patient_id}_4DCT_Lunge_amplitudebased_complete/phase_00.nii"
+    #     for patient_id in test_patients
+    # )
+
+    IMAGE_FILEPATHS = []
+    SEGMENTATION_FILEPATHS = []
+
+    # IMAGE_FILEPATHS += IMAGE_FILEPATHS_LUNA16
+    # SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_LUNA16
+
+    IMAGE_FILEPATHS += IMAGE_FILEPATHS_TOTALSEGMENTATOR
+    SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR
+    (
+        train_image_filepaths,
+        test_image_filepaths,
+        train_segmentation_filepaths,
+        test_segmentation_filepaths,
+    ) = train_test_split(
+        IMAGE_FILEPATHS, SEGMENTATION_FILEPATHS, train_size=0.90, random_state=1337
+    )
+
+    # train_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TRAIN
+    # test_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TEST
+    # train_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TRAIN
+    # test_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TEST
+
+    train_dataset = SegmentationDataset(
+        image_filepaths=train_image_filepaths[:2],
+        segmentation_filepaths=train_segmentation_filepaths[:2],
+        segmentation_merge_function=SegmentationDataset.merge_mc_segmentations,
+        patch_shape=(256, 256, 64),
+        image_spacing_range=((1.0, 1.0), (1.0, 1.0), (1.0, 1.0)),
+        patches_per_image=32,
+        force_non_background=True,
+        force_balanced_sampling=True,
+        random_rotation=False,
+        add_noise=100.0,
+        shift_image_values=(-0.9, 1.1),
+        input_value_range=(-1024, 3071),
+        output_value_range=(0, 1),
+    )
+
+    for data in train_dataset:
+        print(data["patch_id"], data["i_patch"])

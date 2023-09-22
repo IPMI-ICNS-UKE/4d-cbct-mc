@@ -14,7 +14,7 @@ from cbctmc.speedup.models import FlexUNet
 if __name__ == "__main__":
     logging.getLogger("cbctmc").setLevel(logging.INFO)
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     init_fancy_logging()
 
@@ -76,7 +76,9 @@ if __name__ == "__main__":
         return_bottleneck=False,
     )
     state = torch.load(
-        "/datalake2/runs/mc_segmentation/models_9566ce013dfd4797a8b6a0a6/validation/step_155000.pth"
+        # "/datalake2/runs/mc_segmentation/models_9566ce013dfd4797a8b6a0a6/validation/step_155000.pth"
+        # "/datalake2/runs/mc_material_segmentation/5147b8f71bb14732b310ec72/models/validation/step_19000.pth"
+        "/datalake2/runs/mc_material_segmentation_totalsegmentator/2023-09-20T12:07:30.455221_run_cc0235df0c3a41bb9830774c/models/training/step_75000.pth"
         # "/datalake2/runs/mc_segmentation/"
         # "models_0961491db6c842c3958ffb1d/validation/step_72000.pth",
         # "/datalake2/runs/mc_segmentation/models_3f44803be7e542dba54e8ebd/validation/step_15000.pth"

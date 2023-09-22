@@ -13,7 +13,7 @@ from cbctmc.common_types import TorchDevice
 from cbctmc.segmentation.labels import LABELS, N_LABELS
 from cbctmc.segmentation.patching import PatchExtractor, PatchStitcher
 from cbctmc.speedup.models import FlexUNet
-from cbctmc.utils import resample_image_spacing, rescale_range
+from cbctmc.utils import pad_image, resample_image_spacing, rescale_range
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,9 @@ class MCSegmenter:
             output_range=(0, 1),
             clip=True,
         )
+        # pad image if patch_size > image.shape
+        image = pad_image(image, target_shape=self.patch_shape, image_pad_value=0.0)
+
         spatial_image_shape = image.shape
         image = torch.as_tensor(image[None, None], device=self.device)
 
@@ -77,13 +80,16 @@ class MCSegmenter:
                 stitcher.add_patch(prediction, slicing=slicing)
 
         prediction = stitcher.calculate_mean()
+
+        raw_prediction = prediction.copy()
+
         prediction[8] = prediction[8] > 0.5
 
         # argmax and convert to one hot
         argmax_label = np.argmax(prediction[:8], axis=0)
         prediction[:8] = np.eye(8, dtype=np.uint8)[:, argmax_label]
 
-        return prediction.astype(np.uint8)
+        return prediction.astype(np.uint8), raw_prediction
 
 
 if __name__ == "__main__":
@@ -113,13 +119,14 @@ if __name__ == "__main__":
         return_bottleneck=False,
     )
     state = torch.load(
-        "/datalake2/runs/mc_segmentation/"
-        "models_0961491db6c842c3958ffb1d/validation/step_72000.pth",
+        "/datalake2/runs/mc_material_segmentation/5147b8f71bb14732b310ec72/models/validation/step_19000.pth"
         # "/datalake2/runs/mc_segmentation/models_3f44803be7e542dba54e8ebd/validation/step_15000.pth"
     )
     model.load_state_dict(state["model"])
 
-    segmenter = MCSegmenter(model, device="cuda:1")
+    segmenter = MCSegmenter(
+        model, device="cuda:0", patch_shape=(512, 512, 96), patch_overlap=0.0
+    )
 
     image = sitk.ReadImage(
         "/datalake_fast/mc_test/022_4DCT_Lunge_amplitudebased_complete/phase_00.nii"
@@ -134,16 +141,19 @@ if __name__ == "__main__":
     image_arr = sitk.GetArrayFromImage(image)
     image_arr = np.swapaxes(image_arr, 0, 2)
 
-    segmentation = segmenter.segment(image_arr, patch_shape=(128, 128, 128))
+    segmentation, raw = segmenter.segment(
+        image_arr,
+    )
 
-    s = np.swapaxes(segmentation, 1, 3)
+    s = np.swapaxes(raw, 1, 3)
     s = np.moveaxis(s, 0, -1)
     s = sitk.GetImageFromArray(s)
+
     s.SetSpacing(image.GetSpacing())
     s.SetOrigin(image.GetOrigin())
     s.SetDirection(image.GetDirection())
 
     sitk.WriteImage(
         s,
-        "/datalake_fast/mc_test/022_4DCT_Lunge_amplitudebased_complete/phase_00_seg.nii.gz",
+        "/datalake_fast/mc_test/022_4DCT_Lunge_amplitudebased_complete/phase_00_seg.nii",
     )

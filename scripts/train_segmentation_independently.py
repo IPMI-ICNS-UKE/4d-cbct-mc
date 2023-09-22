@@ -14,7 +14,7 @@ from cbctmc.segmentation.dataset import PickleDataset, SegmentationDataset
 from cbctmc.segmentation.labels import LABELS, LABELS_TO_LOAD
 from cbctmc.segmentation.losses import DiceLoss
 from cbctmc.segmentation.trainer import CTSegmentationTrainer
-from cbctmc.speedup.models import FlexUNet
+from cbctmc.speedup.models import DenseNet, FlexUNet
 from cbctmc.utils import dict_collate
 
 logging.getLogger("cbctmc").setLevel(logging.INFO)
@@ -72,7 +72,7 @@ SEGMENTATION_FILEPATHS_LUNA16 = [
 ]
 
 # TOTALSEGMENTATOR
-ROOT_DIR_TOTALSEGMENTATOR = Path("/datalake_fast/totalsegmentator_mc")
+ROOT_DIR_TOTALSEGMENTATOR = Path("/datalake/totalsegmentator_mc")
 IMAGE_FILEPATHS_TOTALSEGMENTATOR = sorted(
     p for p in ROOT_DIR_TOTALSEGMENTATOR.glob("*/ct.nii.gz")
 )
@@ -157,68 +157,75 @@ SEGMENTATION_FILEPATHS_INHOUSE_TEST = [
     for image_filepath in IMAGE_FILEPATHS_INHOUSE_TEST
 ]
 
+# IMAGE_FILEPATHS_INHOUSE_TRAIN = sorted(
+#     ROOT_DIR_INHPUSE / f"{patient_id}_4DCT_Lunge_amplitudebased_complete/phase_00.nii"
+#     for patient_id in train_patients
+# )
+# IMAGE_FILEPATHS_INHOUSE_TEST = sorted(
+#     ROOT_DIR_INHPUSE / f"{patient_id}_4DCT_Lunge_amplitudebased_complete/phase_00.nii"
+#     for patient_id in test_patients
+# )
+
+
 IMAGE_FILEPATHS = []
 SEGMENTATION_FILEPATHS = []
 
 # IMAGE_FILEPATHS += IMAGE_FILEPATHS_LUNA16
 # SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_LUNA16
 
-IMAGE_FILEPATHS += IMAGE_FILEPATHS_TOTALSEGMENTATOR
-SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR
-(
-    train_image_filepaths,
-    test_image_filepaths,
-    train_segmentation_filepaths,
-    test_segmentation_filepaths,
-) = train_test_split(
-    IMAGE_FILEPATHS, SEGMENTATION_FILEPATHS, train_size=0.90, random_state=1337
-)
-
-# train_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TRAIN
-# test_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TEST
-# train_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TRAIN
-# test_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TEST
-
-train_dataset = SegmentationDataset(
-    image_filepaths=train_image_filepaths,
-    segmentation_filepaths=train_segmentation_filepaths,
-    segmentation_merge_function=SegmentationDataset.merge_mc_segmentations,
-    patch_shape=(384, 384, 64),
-    image_spacing_range=((1.0, 1.0), (1.0, 1.0), (1.0, 1.0)),
-    patches_per_image=16,
-    force_non_background=True,
-    force_balanced_sampling=True,
-    random_rotation=True,
-    add_noise=100.0,
-    shift_image_values=(0.9, 1.1),
-    input_value_range=(-1024, 3071),
-    output_value_range=(0, 1),
-)
-test_dataset = SegmentationDataset(
-    image_filepaths=test_image_filepaths,
-    segmentation_filepaths=test_segmentation_filepaths,
-    segmentation_merge_function=SegmentationDataset.merge_mc_segmentations,
-    patch_shape=(384, 384, 64),
-    image_spacing_range=((1.0, 1.0), (1.0, 1.0), (1.0, 1.0)),
-    patches_per_image=16,
-    force_non_background=True,
-    force_balanced_sampling=True,
-    random_rotation=False,
-    add_noise=0.0,
-    shift_image_values=None,
-    input_value_range=(-1024, 3071),
-    output_value_range=(0, 1),
-)
-
-# compiled_dataset_folder = Path(
-#     "/datalake2/mc_material_segmentation_dataset_inhouse_full_aug_256_256_64"
+# IMAGE_FILEPATHS += IMAGE_FILEPATHS_TOTALSEGMENTATOR
+# SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR
+# (
+#     train_image_filepaths,
+#     test_image_filepaths,
+#     train_segmentation_filepaths,
+#     test_segmentation_filepaths,
+# ) = train_test_split(
+#     IMAGE_FILEPATHS, SEGMENTATION_FILEPATHS, train_size=0.90, random_state=1337
 # )
-# train_dataset = PickleDataset(
-#     filepaths=list((compiled_dataset_folder / "train").glob("*"))
+
+train_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TRAIN
+test_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TEST
+train_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TRAIN
+test_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TEST
+
+
+# train_dataset = SegmentationDataset(
+#     image_filepaths=train_image_filepaths,
+#     segmentation_filepaths=train_segmentation_filepaths,
+#     segmentation_merge_function=SegmentationDataset.merge_mc_segmentations,
+#     patch_shape=(384, 384, 32),
+#     image_spacing_range=((1.0, 1.0), (1.0, 1.0), (1.0, 1.0)),
+#     patches_per_image=32,
+#     force_non_background=True,
+#     force_balanced_sampling=True,
+#     random_rotation=False,
+#     input_value_range=(-1024, 3071),
+#     output_value_range=(0, 1),
 # )
-# test_dataset = PickleDataset(
-#     filepaths=list((compiled_dataset_folder / "test").glob("*"))
+# test_dataset = SegmentationDataset(
+#     image_filepaths=test_image_filepaths,
+#     segmentation_filepaths=test_segmentation_filepaths,
+#     segmentation_merge_function=SegmentationDataset.merge_mc_segmentations,
+#     patch_shape=(384, 384, 32),
+#     image_spacing_range=((1.0, 1.0), (1.0, 1.0), (1.0, 1.0)),
+#     patches_per_image=32,
+#     force_non_background=True,
+#     force_balanced_sampling=True,
+#     random_rotation=False,
+#     input_value_range=(-1024, 3071),
+#     output_value_range=(0, 1),
 # )
+
+compiled_dataset_folder = Path(
+    "/datalake2/mc_material_segmentation_dataset_inhouse_full_aug_256_256_64"
+)
+train_dataset = PickleDataset(
+    filepaths=list((compiled_dataset_folder / "train").glob("*"))
+)
+test_dataset = PickleDataset(
+    filepaths=list((compiled_dataset_folder / "test").glob("*"))
+)
 
 
 COLLATE_NOOP_KEYS = (
@@ -235,56 +242,67 @@ train_data_loader = DataLoader(
     batch_size=1,
     collate_fn=partial(dict_collate, noop_keys=COLLATE_NOOP_KEYS),
     pin_memory=True,
-    # shuffle=True,
-    # num_workers=4,
-    # persistent_workers=True,
+    shuffle=True,
+    num_workers=4,
+    persistent_workers=True,
 )
 test_data_loader = DataLoader(
     test_dataset,
     batch_size=1,
     collate_fn=partial(dict_collate, noop_keys=COLLATE_NOOP_KEYS),
     pin_memory=True,
-    # shuffle=True,
-    # num_workers=4,
-    # persistent_workers=True,
+    shuffle=True,
+    num_workers=4,
+    persistent_workers=True,
 )
 
-enc_filters = [32, 32, 32, 32]
-dec_filters = [32, 32, 32, 32]
+enc_filters = [8, 8, 8, 8]
+dec_filters = [8, 8, 8, 8]
 
-DEVICE = "cuda:0"
-model = FlexUNet(
-    n_channels=1,
-    n_classes=len(LABELS),
-    n_levels=4,
-    # filter_base=4,
-    n_filters=[32, *enc_filters, *dec_filters, 32],
-    convolution_layer=nn.Conv3d,
-    downsampling_layer=nn.MaxPool3d,
-    upsampling_layer=nn.Upsample,
-    norm_layer=nn.InstanceNorm3d,
-    skip_connections=True,
-    convolution_kwargs=None,
-    downsampling_kwargs=None,
-    upsampling_kwargs=None,
-    return_bottleneck=False,
+DEVICE = "cuda:1"
+# model = FlexUNet(
+#     n_channels=1,
+#     n_classes=1,
+#     n_levels=4,
+#     # filter_base=4,
+#     n_filters=[8, *enc_filters, *dec_filters, 8],
+#     convolution_layer=nn.Conv3d,
+#     downsampling_layer=nn.MaxPool3d,
+#     upsampling_layer=nn.Upsample,
+#     norm_layer=nn.InstanceNorm3d,
+#     skip_connections=True,
+#     convolution_kwargs=None,
+#     downsampling_kwargs=None,
+#     upsampling_kwargs=None,
+#     return_bottleneck=False,
+# )
+model = DenseNet(
+    n_dims=3,
+    in_channels=1,
+    out_channels=1,
+    growth_rate=4,
+    n_blocks=2,
+    n_block_layers=2,
+    local_feature_fusion_channels=16,
+    pre_block_channels=16,
+    post_block_channels=16,
 )
-
-optimizer = Adam(params=model.parameters(), lr=1e-3)
-
 # state = torch.load(
-#     "/datalake2/runs/mc_material_segmentation_totalsegmentator/2023-09-20T12:07:30.455221_run_cc0235df0c3a41bb9830774c/models/training/step_75000.pth",
+#     "/datalake2/runs/mc_segmentation/"
+#     "models_0961491db6c842c3958ffb1d/validation/step_72000.pth",
 #     map_location=DEVICE,
 # )
+# state = torch.load(
+#     "/datalake2/runs/mc_segmentation/8aa72270bc144eb1be7f6665/models/training/step_2000.pth"
+# )
 # model.load_state_dict(state["model"])
-
 # loss_function = nn.BCEWithLogitsLoss(reduction="none")
-# loss_function = DiceLoss(include_background=True, sigmoid=True, reduction="none")
-
-loss_function = SegmentationLoss(use_dice=True)
+loss_function = DiceLoss(include_background=True, sigmoid=True, reduction="none")
+# loss_function = SegmentationLoss(use_dice=True)
 # loss_function = DiceLoss(include_background=True, softmax=True, reduction="none")
 
 
+optimizer = Adam(params=model.parameters(), lr=1e-3)
 lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer,
     factor=0.9,
@@ -295,6 +313,8 @@ lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     min_lr=1e-6,
 )
 
+single_segmentation = "lung"
+
 trainer = CTSegmentationTrainer(
     model=model,
     loss_function=loss_function,
@@ -302,9 +322,10 @@ trainer = CTSegmentationTrainer(
     lr_scheduler=lr_scheduler,
     train_loader=train_data_loader,
     val_loader=test_data_loader,
-    run_folder="/datalake2/runs/mc_material_segmentation_inhouse",
-    experiment_name="mc_material_segmentation_inhouse",
+    single_segmentation=single_segmentation,
+    run_folder=f"/datalake2/runs/mc_material_segmentation_{single_segmentation}",
+    experiment_name=f"mc_material_segmentation_{single_segmentation}",
     device=DEVICE,
 )
 
-trainer.run(steps=100_000_000, validation_interval=5000, save_interval=1000)
+trainer.run(steps=100_000_000, validation_interval=1000, save_interval=1000)

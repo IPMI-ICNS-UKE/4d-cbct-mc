@@ -8,8 +8,8 @@ from abc import ABC, abstractmethod
 from collections import UserList
 from pathlib import Path
 from typing import List, Sequence, Tuple, Union
-import matplotlib.pyplot as plt
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pkg_resources
 import SimpleITK as sitk
@@ -407,7 +407,7 @@ class MCGeometry:
 
         if segmenter:
             # if a segmenter is given: predict segmentations
-            segmentation = segmenter.segment(image)
+            segmentation, _ = segmenter.segment(image)
 
             body_segmentation = segmentation[get_label_index("background")] == 0
             bone_segmentation = segmentation[get_label_index("upper_body_bones")]
@@ -654,7 +654,7 @@ class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
             "distance": 0,
             "radius": 30,
             "length": 40,
-        }
+        },
     }
 
     def __init__(
@@ -705,7 +705,9 @@ class MCCatPhan604Geometry(MCGeometry, CylindricalPhantomMixin):
 
     @staticmethod
     def calculate_roi_statistics(
-        image: np.ndarray, radius_margin: float = 1.0, height_margin: float = 1.0,
+        image: np.ndarray,
+        radius_margin: float = 1.0,
+        height_margin: float = 1.0,
     ):
         phantom_center = np.array(image.shape) / 2
         results = {}

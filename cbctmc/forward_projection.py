@@ -134,8 +134,8 @@ def project_forward(
 
 
 def create_geometry(
-    start_angle: float,
     n_projections: int,
+    start_angle: float = 270.0,
     source_to_isocenter: float = 1000.0,
     source_to_detector: float = 1500.0,
     detector_offset_x: float = -160.0,

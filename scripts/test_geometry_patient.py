@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ipmi.common.logger import init_fancy_logging
 
+from cbctmc.defaults import DefaultMCSimulationParameters
 from cbctmc.forward_projection import (
     create_geometry,
     prepare_image_for_rtk,
@@ -75,13 +76,14 @@ if __name__ == "__main__":
     #     "source_to_isocenter_distance_offset": 4.3951556461792665,
     # }
 
-    calibrations = {
-        "offset_x": -0.5030858965528291,
-        "offset_y": -3.749082176733503,
-        "offset_z": -0.29206039325204886,
-        "source_to_detector_distance_offset": 0.13054052787167872,
-        "source_to_isocenter_distance_offset": 3.2595168038949205,
-    }
+    # calibrations = {
+    #     "offset_x": -0.5030858965528291,
+    #     "offset_y": -3.749082176733503,
+    #     "offset_z": -0.29206039325204886,
+    #     "source_to_detector_distance_offset": 0.13054052787167872,
+    #     "source_to_isocenter_distance_offset": 3.2595168038949205,
+    # }
+
     # calibrations = {
     #     "offset_x": -0.5,
     #     "offset_y": -0.5,
@@ -146,22 +148,14 @@ if __name__ == "__main__":
     for run in RUNS[GPU]:
         simulation_config = CONFIGS[run]
 
+        mc_defaults = DefaultMCSimulationParameters()
+
         simulation = MCSimulation(geometry=geometry, **simulation_config)
         simulation.run_simulation(
             output_folder / run_folder,
             run_air_simulation=True,
             clean=True,
             gpu_id=GPU,
-            source_position_offset=(
-                calibrations["offset_x"],
-                calibrations["offset_y"],
-                calibrations["offset_z"],
-            ),
-            source_to_isocenter_distance_offset=calibrations[
-                "source_to_isocenter_distance_offset"
-            ],
-            source_to_detector_distance_offset=calibrations[
-                "source_to_detector_distance_offset"
-            ],
             force_rerun=True,
+            **mc_defaults.geometrical_corrections,
         )
