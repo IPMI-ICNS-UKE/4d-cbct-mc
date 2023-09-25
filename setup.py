@@ -7,7 +7,7 @@ setup(
     packages=find_packages(),
     entry_points={
         "console_scripts": [
-            "run_mc = cbctmc.main:run",
+            "run-mc = scripts.run_mc_simulations:run",
             "fit-noise = scripts.fit_noise:run",
         ],
     },

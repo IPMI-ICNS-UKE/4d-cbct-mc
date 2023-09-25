@@ -93,7 +93,7 @@ from cbctmc.speedup.models import FlexUNet
     type=click.Choice(["debug", "info", "warning", "error", "critical"]),
     default="info",
 )
-def run_speedup_simulations(
+def run(
     data_folder: Path,
     output_folder: Path,
     gpu: int,
@@ -270,4 +270,4 @@ def run_speedup_simulations(
 
 
 if __name__ == "__main__":
-    run_speedup_simulations()
+    run()
