@@ -43,7 +43,7 @@ from cbctmc.speedup.models import FlexUNet
 @click.option(
     "--regex",
     type=str,
-    default=re.compile(".*"),
+    default=".*",
 )
 @click.option(
     "--output-folder",
@@ -180,7 +180,7 @@ def run(
 
     logger.info(
         f"Found {len(patients)} patients using "
-        f"data folder {data_folder} and regex pattern {regex.pattern}"
+        f"data folder {data_folder} and regex pattern {regex}"
     )
     patients = patients[i_worker - 1 :: n_workers]
 
