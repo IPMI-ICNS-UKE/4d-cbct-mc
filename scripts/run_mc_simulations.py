@@ -107,7 +107,7 @@ def run(
     output_folder: Path,
     gpu: int,
     i_worker: int,
-    n_worker: int,
+    n_workers: int,
     reference: bool,
     phases: List[int],
     speedups: List[int],
@@ -182,11 +182,11 @@ def run(
         f"Found {len(patients)} patients using "
         f"data folder {data_folder} and regex pattern {regex}"
     )
-    patients = patients[i_worker - 1 :: n_worker]
+    patients = patients[i_worker - 1 :: n_workers]
 
     logger.info(
         f"Running simulations for {len(patients)} patients "
-        f"(worker {i_worker}/{n_worker})"
+        f"(worker {i_worker}/{n_workers})"
     )
 
     for patient_folder in patients:
