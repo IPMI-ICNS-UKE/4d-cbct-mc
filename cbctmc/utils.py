@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from pathlib import Path
 from typing import Any, Sequence, Tuple
@@ -10,6 +11,8 @@ import SimpleITK as sitk
 import torch
 
 from cbctmc.common_types import ArrayOrTensor, IntTuple3D, Number
+
+logger = logging.getLogger(__name__)
 
 
 def hash_path(path: Path) -> str:
@@ -297,7 +300,8 @@ def get_folders_by_regex(root: Path, regex: str):
     for entry in root.iterdir():
         if entry.is_dir() and pattern.match(entry.name):
             yield entry
-
-
-if __name__ == "__main__":
-    r, rr = crop_or_pad(np.zeros((100, 20, 30)), target_shape=(10, 200, 30))
+        else:
+            logger.debug(
+                f"Skipping {entry}, as it does not match "
+                f"regex pattern {pattern.pattern}"
+            )

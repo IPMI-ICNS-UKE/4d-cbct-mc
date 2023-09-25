@@ -180,7 +180,7 @@ def run(
 
     logger.info(
         f"Found {len(patients)} patients using "
-        f"data folder {data_folder} and regex pattern {regex}"
+        f"data folder {data_folder} and regex pattern {regex.pattern}"
     )
     patients = patients[i_worker - 1 :: n_workers]
 
