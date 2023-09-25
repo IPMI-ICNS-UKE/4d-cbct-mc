@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Any, Sequence, Tuple
 
@@ -288,6 +289,14 @@ def get_robust_bounding_box_3d(
     z_min, z_max = max(z_min - padding[2], 0), min(z_max + padding[2], image.shape[2])
 
     return np.index_exp[x_min : x_max + 1, y_min : y_max + 1, z_min : z_max + 1]
+
+
+def get_folders_by_regex(root: Path, regex: str):
+    pattern = re.compile(regex)
+
+    for entry in root.iterdir():
+        if entry.is_dir() and pattern.match(entry.name):
+            yield entry
 
 
 if __name__ == "__main__":

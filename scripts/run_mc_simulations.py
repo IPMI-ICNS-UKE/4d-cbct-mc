@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from pathlib import Path
 from typing import List, Tuple
 
@@ -7,6 +8,8 @@ import click
 import torch
 from ipmi.common.logger import init_fancy_logging
 from torch import nn
+
+from cbctmc.utils import get_folders_by_regex
 
 # order GPU ID by PCI bus ID
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -38,6 +41,11 @@ from cbctmc.speedup.models import FlexUNet
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
 )
 @click.option(
+    "--regex",
+    type=str,
+    default=re.compile(".*"),
+)
+@click.option(
     "--output-folder",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
 )
@@ -61,7 +69,7 @@ from cbctmc.speedup.models import FlexUNet
     "--speedups",
     type=int,
     multiple=True,
-    default=[2, 5, 10],
+    default=[],
 )
 @click.option(
     "--phases",
@@ -95,6 +103,7 @@ from cbctmc.speedup.models import FlexUNet
 )
 def run(
     data_folder: Path,
+    regex: str,
     output_folder: Path,
     gpu: int,
     i_worker: int,
@@ -127,6 +136,13 @@ def run(
             for s in speedups
         }
     )
+    if not CONFIGS:
+        logger.warning(
+            "No simulation configs specified. "
+            "Please use --reference and/or --speedups to specify runs"
+        )
+        return
+
     logger.info(f"Simulation configs: {CONFIGS}")
     if segmenter_weights:
         enc_filters = [32, 32, 32, 32]
@@ -160,8 +176,12 @@ def run(
     else:
         segmenter = None
 
-    patients = sorted(Path(data_folder).iterdir())
-    logger.info(f"Found {len(patients)} patients")
+    patients = sorted(get_folders_by_regex(data_folder, regex=regex))
+
+    logger.info(
+        f"Found {len(patients)} patients using "
+        f"data folder {data_folder} and regex pattern {regex}"
+    )
     patients = patients[i_worker - 1 :: n_worker]
 
     logger.info(
