@@ -132,7 +132,7 @@ def run(
     if reference:
         CONFIGS["reference"] = {
             "n_histories": int(MCDefaults.n_histories),
-            n_projections: n_projections,
+            "n_projections": n_projections,
         }
     CONFIGS.update(
         {
