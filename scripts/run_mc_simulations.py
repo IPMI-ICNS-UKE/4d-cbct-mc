@@ -213,6 +213,7 @@ def run(
                     (simulation_folder / "geometry_materials.nii.gz").exists(),
                     (simulation_folder / "geometry_densities.nii.gz").exists(),
                     (simulation_folder / "density_fp.mha").exists(),
+                    (simulation_folder / "geometry.pkl.gz").exists(),
                 )
             )
 
@@ -293,15 +294,21 @@ def run(
                     run_air_simulation=True,
                     clean=True,
                     gpu_id=gpu,
+                    force_rerun=False,
                 )
 
                 if reconstruct:
                     logger.info("Reconstruct simulation")
                     reconstruct_3d(
-                        projections_filepath=simulation_folder
-                        / "projections_total_normalized.mha",
+                        projections_filepath=(
+                            simulation_folder
+                            / config_name
+                            / "projections_total_normalized.mha"
+                        ),
                         geometry_filepath=simulation_folder / "geometry.xml",
-                        output_folder=simulation_folder / "reconstructions",
+                        output_folder=(
+                            simulation_folder / config_name / "reconstructions"
+                        ),
                         output_filename="fdk3d_wpc.mha",
                         dimension=(464, 250, 464),
                         water_pre_correction=ReconDefaults.wpc_catphan604,
