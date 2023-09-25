@@ -9,6 +9,7 @@ import torch
 from ipmi.common.logger import init_fancy_logging
 from torch import nn
 
+from cbctmc.reconstruction.reconstruction import reconstruct_3d
 from cbctmc.utils import get_folders_by_regex
 
 # order GPU ID by PCI bus ID
@@ -17,6 +18,7 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 import itk
 
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
+from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 from cbctmc.forward_projection import (
     create_geometry,
     prepare_image_for_rtk,
@@ -96,6 +98,7 @@ from cbctmc.speedup.models import FlexUNet
     type=int,
     default=MCDefaults.n_projections,
 )
+@click.option("--reconstruct", is_flag=True)
 @click.option(
     "--loglevel",
     type=click.Choice(["debug", "info", "warning", "error", "critical"]),
@@ -115,6 +118,7 @@ def run(
     segmenter_patch_shape: Tuple[int, int, int],
     segmenter_patch_overlap: float,
     n_projections: int,
+    reconstruct: bool,
     loglevel: str,
 ):
     # set up logging
@@ -126,7 +130,10 @@ def run(
 
     CONFIGS = {}
     if reference:
-        CONFIGS["reference"] = {"n_histories": int(MCDefaults.n_histories)}
+        CONFIGS["reference"] = {
+            "n_histories": int(MCDefaults.n_histories),
+            n_projections: n_projections,
+        }
     CONFIGS.update(
         {
             f"speedup_{s:02d}x": {
@@ -287,6 +294,18 @@ def run(
                     clean=True,
                     gpu_id=gpu,
                 )
+
+                if reconstruct:
+                    logger.info("Reconstruct simulation")
+                    reconstruct_3d(
+                        projections_filepath=simulation_folder
+                        / "projections_total_normalized.mha",
+                        geometry_filepath=simulation_folder / "geometry.xml",
+                        output_folder=simulation_folder / "reconstructions",
+                        output_filename="fdk3d_wpc.mha",
+                        dimension=(464, 250, 464),
+                        water_pre_correction=ReconDefaults.wpc_catphan604,
+                    )
 
 
 if __name__ == "__main__":
