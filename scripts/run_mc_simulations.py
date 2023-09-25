@@ -133,12 +133,14 @@ def run(
         CONFIGS["reference"] = {
             "n_histories": int(MCDefaults.n_histories),
             "n_projections": n_projections,
+            "angle_between_projections": 360.0 / n_projections,
         }
     CONFIGS.update(
         {
             f"speedup_{s:02d}x": {
                 "n_histories": int(MCDefaults.n_histories / s),
                 "n_projections": n_projections,
+                "angle_between_projections": 360.0 / n_projections,
             }
             for s in speedups
         }
