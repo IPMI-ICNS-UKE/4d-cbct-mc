@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from pprint import pprint
+from typing import Sequence
 
 import click
 import matplotlib.pyplot as plt
@@ -20,6 +20,8 @@ from cbctmc.mc.reference import REFERENCE_ROI_STATS_CATPHAN604_VARIAN
 from cbctmc.mc.simulation import MCSimulation
 from cbctmc.reconstruction.reconstruction import reconstruct_3d
 
+logger = logging.getLogger(__name__)
+
 
 @click.command()
 @click.option(
@@ -27,60 +29,94 @@ from cbctmc.reconstruction.reconstruction import reconstruct_3d
     help="Output folder for (intermediate) results",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
     default=Path("."),
+    show_default=True,
 )
 @click.option(
     "--gpu",
     help="GPU PCI bus ID to use for simulation",
     type=int,
     default=0,
+    show_default=True,
 )
 @click.option(
     "--n-projections", type=int, default=DefaultVarianScanParameters.n_projections
+)
+@click.option(
+    "--material",
+    type=str,
+    multiple=True,
+    default=(
+        "air_1",
+        "air_2",
+        "pmp",
+        "ldpe",
+        "polystyrene",
+        "bone_020",
+        "acrylic",
+        "bone_050",
+        "delrin",
+        "teflon",
+        "water",
+    ),
+    show_default=True,
 )
 @click.option(
     "--initial-n-histories",
     help="Initial number of histories",
     type=int,
     default=2e9,
+    show_default=True,
 )
 @click.option(
     "--lower-boundary",
     help="Lower boundary for number of histories",
     default=1e8,
+    show_default=True,
 )
 @click.option(
     "--upper-boundary",
     help="Upper boundary for number of histories",
     default=3e9,
+    show_default=True,
 )
 @click.option(
     "--n-runs",
     help="Number of runs to average over for each simulation configuration",
     type=int,
     default=3,
+    show_default=True,
 )
 @click.option(
     "--loglevel",
     type=click.Choice(["debug", "info", "warning", "error", "critical"]),
     default="debug",
+    show_default=True,
 )
 def run(
     output_folder: Path,
     gpu: int,
     n_projections: int,
+    material: Sequence[str],
     initial_n_histories: int,
     lower_boundary: int,
     upper_boundary: int,
     n_runs: int,
     loglevel: str,
 ):
+    # set up logging
+    loglevel = getattr(logging, loglevel.upper())
+    logging.getLogger("cbctmc").setLevel(loglevel)
+    logger.setLevel(loglevel)
+    init_fancy_logging()
+
+    logger.info(f"Starting noise optimization using meterials {material}")
     function = lambda x: calculate_variance_deviation(
         n_histories=int(x),
+        materials=material,
         output_folder=output_folder,
         gpu=gpu,
         n_projections=n_projections,
         number_runs=n_runs,
-        loglevel=loglevel,
     )
     res = opt.minimize(
         function,
@@ -88,25 +124,18 @@ def run(
         method="Nelder-Mead",
         bounds=[(lower_boundary, upper_boundary)],
     )
-    pprint(res.x)
-    pprint(res)
+
+    logger.info(f"Optimization finished with following result for n_histories: {res.x}")
 
 
 def calculate_variance_deviation(
     n_histories: int,
+    materials: Sequence[str],
     output_folder: Path,
     gpu: int,
     n_projections: int,
     number_runs: int,
-    loglevel: str,
 ):
-    # set up logging
-    loglevel = getattr(logging, loglevel.upper())
-    logging.getLogger("cbctmc").setLevel(loglevel)
-    logger = logging.getLogger(__name__)
-    logger.setLevel(loglevel)
-    init_fancy_logging()
-
     if not output_folder.exists():
         # create output folder
         output_folder.mkdir(parents=True, exist_ok=True)
@@ -160,20 +189,6 @@ def calculate_variance_deviation(
             water_pre_correction=ReconDefaults.wpc_catphan604,
         )
 
-        materials = (
-            "air_1",
-            "air_2",
-            "pmp",
-            "ldpe",
-            "polystyrene",
-            "bone_020",
-            "acrylic",
-            "bone_050",
-            "delrin",
-            "teflon",
-            "water",
-        )
-
         mc_recon = sitk.ReadImage(
             str(output_folder / run_folder / "reconstructions" / "fdk3d_wpc.mha")
         )
@@ -194,15 +209,8 @@ def calculate_variance_deviation(
             radius_margin=2,
         )
 
-        print("MC fdk3d_wpc")
-        pprint(mc_roi_stats)
         with open(
-            str(
-                output_folder
-                / run_folder
-                / "reconstructions"
-                / f"mc_roi_stats_{n_histories}.json"
-            ),
+            str(output_folder / run_folder / "reconstructions" / f"roi_stats.json"),
             "wt",
         ) as file:
             json.dump(mc_roi_stats, file, indent=4)
@@ -216,7 +224,9 @@ def calculate_variance_deviation(
     )
     rel_dev = (mean_roi_stats - reference_roi_stats) / reference_roi_stats
     mean_rel_dev = np.mean(rel_dev)
-    pprint(mean_rel_dev)
+
+    logger.info(f"Current deviation: {mean_rel_dev} for {n_histories} histories")
+
     return np.abs(mean_rel_dev)
 
 
