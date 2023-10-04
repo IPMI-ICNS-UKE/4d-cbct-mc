@@ -16,7 +16,7 @@ if [ "$SESSIONEXISTS" = "" ]; then
 
   # create all windows and run script
   tmux new-window -t $SESSION:1 -n 'gpu 0'
-  tmux send-keys -t 'worker 1' 'conda activate cbctmc' C-m "${CALL} --gpu 0" C-m
+  tmux send-keys -t 'gpu 0' 'conda activate cbctmc' C-m "${CALL} --gpu 0" C-m
 
 fi
 
