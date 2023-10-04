@@ -106,7 +106,7 @@ def normalize_projections(
 ) -> np.ndarray:
     if denoise_kernel_size:
         # denoise air projection using median filter of given kernel size
-        air_projection = ndi.gaussian_filter(air_projection, size=denoise_kernel_size)
+        air_projection = ndi.gaussian_filter(air_projection, sigma=denoise_kernel_size)
         logger.debug(
             f"Denoised air projection using gaussian filter of size {denoise_kernel_size}"
         )
