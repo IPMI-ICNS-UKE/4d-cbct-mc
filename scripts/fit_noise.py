@@ -1,15 +1,15 @@
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
-import json
 
 import click
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.optimize as opt
 import SimpleITK as sitk
 from ipmi.common.logger import init_fancy_logging
-import scipy.optimize as opt
 
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
@@ -57,32 +57,41 @@ from cbctmc.reconstruction.reconstruction import reconstruct_3d
     default="debug",
 )
 def run(
-        output_folder: Path,
-        gpu: int,
-        n_projections: int,
-        initial_n_histories: int,
-        lower_boundary: int,
-        upper_boundary: int,
-        number_runs: int,
-        loglevel: str
-    ):
-    function = lambda x: calcualteVarDeviation(n_histories=int(x), output_folder=output_folder, gpu=gpu,
-                                               n_projections=n_projections, number_runs=number_runs, loglevel=loglevel)
-    res = opt.minimize(function, x0=np.array(initial_n_histories), method="Nelder-Mead",
-                       bounds=[(lower_boundary, upper_boundary)])
+    output_folder: Path,
+    gpu: int,
+    n_projections: int,
+    initial_n_histories: int,
+    lower_boundary: int,
+    upper_boundary: int,
+    number_runs: int,
+    loglevel: str,
+):
+    function = lambda x: calculate_variance_deviation(
+        n_histories=int(x),
+        output_folder=output_folder,
+        gpu=gpu,
+        n_projections=n_projections,
+        number_runs=number_runs,
+        loglevel=loglevel,
+    )
+    res = opt.minimize(
+        function,
+        x0=np.array(initial_n_histories),
+        method="Nelder-Mead",
+        bounds=[(lower_boundary, upper_boundary)],
+    )
     pprint(res.x)
     pprint(res)
 
 
-def calcualteVarDeviation(
-        n_histories: int,
-        output_folder: Path,
-        gpu: int,
-        n_projections: int,
-        number_runs: int,
-        loglevel: str
-    ):
-
+def calculate_variance_deviation(
+    n_histories: int,
+    output_folder: Path,
+    gpu: int,
+    n_projections: int,
+    number_runs: int,
+    loglevel: str,
+):
     # set up logging
     loglevel = getattr(logging, loglevel.upper())
     logging.getLogger("cbctmc").setLevel(loglevel)
@@ -165,7 +174,7 @@ def calcualteVarDeviation(
             "bone_050",
             "delrin",
             "teflon",
-            "water"
+            "water",
         )
 
         mc_recon = sitk.ReadImage(
@@ -183,18 +192,31 @@ def calcualteVarDeviation(
         ax[1].set_title("MC fdk3d_wpc")
 
         mc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
-            mc_recon, height_margin=2, radius_margin=2,
+            mc_recon,
+            height_margin=2,
+            radius_margin=2,
         )
 
         print("MC fdk3d_wpc")
         pprint(mc_roi_stats)
-        with open(str(output_folder / run_folder / "reconstructions"
-                            / f"mc_roi_stats_{str(n_histories)}.json"), "w") as file:
-            json.dump(mc_roi_stats, file, indent=6)
-        mean_roi_stats += np.array([mc_roi_stats[material_name]["std"] for material_name in materials])
+        with open(
+            str(
+                output_folder
+                / run_folder
+                / "reconstructions"
+                / f"mc_roi_stats_{str(n_histories)}.json"
+            ),
+            "wt",
+        ) as file:
+            json.dump(mc_roi_stats, file, indent=4)
+        mean_roi_stats += np.array(
+            [mc_roi_stats[material_name]["std"] for material_name in materials]
+        )
     mean_roi_stats = mean_roi_stats / number_runs
     reference_roi_stats = REFERENCE_ROI_STATS_CATPHAN604_VARIAN
-    reference_roi_stats = np.array([reference_roi_stats[material_name]["std"] for material_name in materials])
+    reference_roi_stats = np.array(
+        [reference_roi_stats[material_name]["std"] for material_name in materials]
+    )
     rel_dev = (mean_roi_stats - reference_roi_stats) / reference_roi_stats
     mean_rel_dev = np.mean(rel_dev)
     pprint(mean_rel_dev)
