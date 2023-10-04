@@ -24,30 +24,38 @@ from cbctmc.reconstruction.reconstruction import reconstruct_3d
 @click.command()
 @click.option(
     "--output-folder",
+    help="Output folder for (intermediate) results",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
     default=Path("."),
 )
 @click.option(
     "--gpu",
+    help="GPU PCI bus ID to use for simulation",
     type=int,
     default=0,
 )
-@click.option("--n-projections", default=DefaultVarianScanParameters.n_projections)
 @click.option(
-    "--initial_n_histories",
+    "--n-projections", type=int, default=DefaultVarianScanParameters.n_projections
+)
+@click.option(
+    "--initial-n-histories",
+    help="Initial number of histories",
     type=int,
     default=2e9,
 )
 @click.option(
-    "--lower_boundary",
+    "--lower-boundary",
+    help="Lower boundary for number of histories",
     default=1e8,
 )
 @click.option(
-    "--upper_boundary",
+    "--upper-boundary",
+    help="Upper boundary for number of histories",
     default=3e9,
 )
 @click.option(
-    "--number_runs",
+    "--n-runs",
+    help="Number of runs to average over for each simulation configuration",
     type=int,
     default=3,
 )
@@ -63,7 +71,7 @@ def run(
     initial_n_histories: int,
     lower_boundary: int,
     upper_boundary: int,
-    number_runs: int,
+    n_runs: int,
     loglevel: str,
 ):
     function = lambda x: calculate_variance_deviation(
@@ -71,7 +79,7 @@ def run(
         output_folder=output_folder,
         gpu=gpu,
         n_projections=n_projections,
-        number_runs=number_runs,
+        number_runs=n_runs,
         loglevel=loglevel,
     )
     res = opt.minimize(
@@ -114,7 +122,7 @@ def calculate_variance_deviation(
         }
 
         output_folder.mkdir(parents=True, exist_ok=True)
-        run_folder = f"run_{n_histories}" + f"_run_{i}"
+        run_folder = f"run_{n_histories}_run_{i:02d}"
 
         (output_folder / run_folder).mkdir(exist_ok=True)
 
@@ -141,17 +149,6 @@ def calculate_variance_deviation(
                 force_rerun=True,
             )
 
-        # reconstruct MC simulation
-        # reconstruct_3d(
-        #     projections_filepath=output_folder
-        #     / run_folder
-        #     / "projections_total_normalized.mha",
-        #     geometry_filepath=output_folder / run_folder / "geometry.xml",
-        #     output_folder=output_folder / run_folder / "reconstructions",
-        #     output_filename="fdk3d.mha",
-        #     dimension=(464, 250, 464),
-        #     water_pre_correction=None,
-        # )
         reconstruct_3d(
             projections_filepath=output_folder
             / run_folder
@@ -204,7 +201,7 @@ def calculate_variance_deviation(
                 output_folder
                 / run_folder
                 / "reconstructions"
-                / f"mc_roi_stats_{str(n_histories)}.json"
+                / f"mc_roi_stats_{n_histories}.json"
             ),
             "wt",
         ) as file:
