@@ -79,6 +79,7 @@ class MCSimulation:
         self,
         output_folder: PathLike,
         run_air_simulation: bool = True,
+        air_projection_denoise_kernel_size: Tuple[int, int] | None = (5, 5),
         clean: bool = True,
         gpu_id: int = 0,
         force_rerun: bool = False,
@@ -203,11 +204,18 @@ class MCSimulation:
 
         # simulation finished or stopped
         self.postprocess_simulation(
-            output_folder, clean=clean, air_normalization=run_air_simulation
+            output_folder,
+            clean=clean,
+            air_normalization=run_air_simulation,
+            air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
         )
 
     def postprocess_simulation(
-        self, folder: PathLike, clean: bool = True, air_normalization: bool = True
+        self,
+        folder: PathLike,
+        clean: bool = True,
+        air_normalization: bool = True,
+        air_projection_denoise_kernel_size: Tuple[int, int] | None = (5, 5),
     ):
         folder = Path(folder)
         projections = get_projections_from_folder(folder)
@@ -229,6 +237,7 @@ class MCSimulation:
             projections_itk = projections_to_itk(
                 projections,
                 air_projection=air_projection,
+                air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
                 mode="total",
             )
             output_filepath = folder / "projections_total_normalized.mha"
@@ -236,7 +245,7 @@ class MCSimulation:
             sitk.WriteImage(projections_itk, str(output_filepath))
 
         if clean:
-            # clean foder
+            # clean folder
             MCSimulation._clean_simulation_folder(folder)
 
     @staticmethod

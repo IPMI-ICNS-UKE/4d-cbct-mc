@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Literal, Sequence, Tuple
 
 import numpy as np
+import scipy.ndimage as ndi
 import SimpleITK as sitk
 from ipmi.common.logger import init_fancy_logging
 
@@ -98,8 +99,18 @@ def projections_to_numpy(projections: Sequence[MCProjection]) -> np.ndarray:
 
 
 def normalize_projections(
-    projections: np.ndarray, air_projection: np.ndarray, clip_to_air: bool = False
+    projections: np.ndarray,
+    air_projection: np.ndarray,
+    clip_to_air: bool = False,
+    denoise_kernel_size: Tuple[int, int] | None = None,
 ) -> np.ndarray:
+    if denoise_kernel_size:
+        # denoise air projection using median filter of given kernel size
+        air_projection = ndi.gaussian_filter(air_projection, size=denoise_kernel_size)
+        logger.debug(
+            f"Denoised air projection using gaussian filter of size {denoise_kernel_size}"
+        )
+
     if clip_to_air:
         # clip  max of projections to air projection
         projections = np.where(
@@ -114,6 +125,7 @@ def normalize_projections(
 def projections_to_itk(
     projections: Sequence[MCProjection],
     air_projection: MCProjection | None = None,
+    air_projection_denoise_kernel_size: Tuple[int, int] | None = None,
     mode: Literal["total", "unscattered", "scattered"] = "total",
 ):
     detector_pixel_size = projections[0].detector_pixel_size
@@ -138,7 +150,11 @@ def projections_to_itk(
             air_projection = air_projection.sum(-1)
 
         # normalize projections according to Beer–Lambert law
-        projections = normalize_projections(projections, air_projection)
+        projections = normalize_projections(
+            projections,
+            air_projection,
+            denoise_kernel_size=air_projection_denoise_kernel_size,
+        )
 
     projections = sitk.GetImageFromArray(projections)
     projections.SetSpacing((detector_pixel_size[0], detector_pixel_size[1], 1))
