@@ -188,8 +188,12 @@ class BodyROIMaterialMapper(BaseMultiMaterialMapper):
 
 
 class LungMaterialMapper(SingleMaterialMapper):
-    def __init__(self):
-        super().__init__(target_material=MATERIALS_125KEV["lung"])
+    def __init__(self, use_air: bool = False):
+        super().__init__(
+            target_material=MATERIALS_125KEV["air"]
+            if use_air
+            else MATERIALS_125KEV["lung"]
+        )
 
 
 class LungVesselsMaterialMapper(SingleMaterialMapper):
@@ -276,7 +280,7 @@ class MaterialMapperPipeline(
         pipeline = [
             (BodyROIMaterialMapper(), body_segmentation),
             (BoneMaterialMapper(), bone_segmentation),
-            (LungMaterialMapper(), lung_segmentation),
+            (LungMaterialMapper(use_air=True), lung_segmentation),
             (LiverMaterialMapper(), liver_segmentation),
             (StomachMaterialMapper(), stomach_segmentation),
             (MuscleMaterialMapper(), muscle_segmentation),
