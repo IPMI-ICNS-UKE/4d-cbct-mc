@@ -139,13 +139,16 @@ class BoneMaterialMapper(BaseMultiMaterialMapper):
     ) -> List[Tuple[np.ndarray, Material]]:
         mask = segmentation > 0
 
-        bone_100_mask = mask & (image >= 400)
-        bone_050_mask = mask & (300 <= image) & (image < 400)
-        bone_020_mask = mask & (150 <= image) & (image < 300)
+        # bone_100_mask = mask & (image >= 400)
+        # bone_050_mask = mask & (300 <= image) & (image < 400)
+        # bone_020_mask = mask & (150 <= image) & (image < 300)
+        # red_marrow_mask = mask & (image < 150)
+
+        bone_050_mask = mask & (400 <= image)
+        bone_020_mask = mask & (150 <= image) & (image < 400)
         red_marrow_mask = mask & (image < 150)
 
         return [
-            (bone_100_mask, MATERIALS_125KEV["bone_100"]),
             (bone_050_mask, MATERIALS_125KEV["bone_050"]),
             (bone_020_mask, MATERIALS_125KEV["bone_020"]),
             (red_marrow_mask, MATERIALS_125KEV["red_marrow"]),

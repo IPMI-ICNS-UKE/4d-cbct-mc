@@ -314,6 +314,7 @@ def run(
                         output_filename="fdk3d_wpc.mha",
                         dimension=(464, 250, 464),
                         water_pre_correction=ReconDefaults.wpc_catphan604,
+                        gpu_id=gpu,
                     )
 
 

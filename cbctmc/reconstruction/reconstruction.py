@@ -4,11 +4,13 @@ import logging
 from pathlib import Path
 from typing import Sequence, Tuple
 
+import click
 import yaml
 from ipmi.common.logger import init_fancy_logging
 from ipmi.reconstruction.cbct.reconstructors import FDKReconstructor
 
 from cbctmc.common_types import PathLike
+from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 
 logger = logging.getLogger(__name__)
 init_fancy_logging()
@@ -44,7 +46,7 @@ def reconstruct_3d(
 
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    reconstructor = FDKReconstructor(use_docker=True)
+    reconstructor = FDKReconstructor(use_docker=True, gpu_id=gpu_id)
 
     fdk_params = dict(
         path=projections_filepath.parent,
@@ -65,3 +67,69 @@ def reconstruct_3d(
 
     with open((output_folder / output_filename).with_suffix(".yaml"), "w") as f:
         yaml.dump(fdk_params, f)
+
+
+@click.command()
+@click.option(
+    "--projections-filepath",
+    help="Filepath to normalized projections file",
+    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    required=True,
+    show_default=True,
+)
+@click.option(
+    "--geometry-filepath",
+    help="Filepath to geometry file",
+    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    required=True,
+    show_default=True,
+)
+@click.option(
+    "--output-filepath",
+    help="Output filepath for the reconstruction results",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    show_default=True,
+)
+@click.option(
+    "--gpu",
+    help="GPU PCI bus ID to use for reconstruction",
+    type=int,
+    default=0,
+    show_default=True,
+)
+@click.option(
+    "--loglevel",
+    type=click.Choice(["debug", "info", "warning", "error", "critical"]),
+    default="debug",
+    show_default=True,
+)
+def _cli(
+    projections_filepath: Path,
+    geometry_filepath: Path,
+    output_filepath: Path,
+    gpu: int,
+    loglevel: str,
+):
+    # set up logging
+    loglevel = getattr(logging, loglevel.upper())
+    logging.getLogger("cbctmc").setLevel(loglevel)
+    logger.setLevel(loglevel)
+    init_fancy_logging()
+
+    # create output folder if not exists
+    output_filepath.parent.mkdir(parents=True, exist_ok=True)
+
+    reconstruct_3d(
+        projections_filepath=projections_filepath,
+        geometry_filepath=geometry_filepath,
+        output_folder=output_filepath.parent,
+        output_filename="fdk3d_wpc.mha",
+        dimension=(464, 250, 464),
+        water_pre_correction=ReconDefaults.wpc_catphan604,
+        gpu_id=gpu,
+    )
+
+
+if __name__ == "__main__":
+    _cli()
