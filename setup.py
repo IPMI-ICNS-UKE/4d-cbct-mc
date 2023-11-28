@@ -8,6 +8,7 @@ setup(
     entry_points={
         "console_scripts": [
             "run-mc = scripts.run_mc_simulations:run",
+            "run-mc-lp = scripts.run_mc_line_pairs:run",
             "recon-mc = cbctmc.reconstruction.reconstruction:_cli",
             "fit-noise = scripts.fit_noise:run",
         ],

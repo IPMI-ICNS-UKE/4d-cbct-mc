@@ -787,3 +787,51 @@ class MCWaterPhantomGeometry(MCGeometry, CylindricalPhantomMixin):
         super().__init__(
             materials=materials, densities=densities, image_spacing=image_spacing
         )
+
+
+class MCLinePairPhantomGeometry(MCWaterPhantomGeometry):
+    def __init__(
+        self,
+        line_spacing_factor: int,
+        line_material: Material = MATERIALS_125KEV["air"],
+        shape: Tuple[int, int, int] = (500, 500, 500),
+        image_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    ):
+        super().__init__(shape=shape, image_spacing=image_spacing)
+
+        self.line_spacing_factor = line_spacing_factor
+        self.line_material = line_material
+        self.n_lines = 4
+        self.line_depth = 20
+
+        self._add_line_pairs()
+
+    def _create_line_pair_mask(self):
+        mask = np.zeros(
+            (
+                ((2 * self.n_lines - 1) * self.line_spacing_factor),
+                self.line_depth,
+                self.line_depth,
+            )
+        )
+
+        for i in range(0, mask.shape[0], 2 * self.line_spacing_factor):
+            mask[i : i + self.line_spacing_factor] = 1
+
+        return mask
+
+    def _add_line_pairs(self):
+        mask = self._create_line_pair_mask()
+
+        # pad mask to full phantom size to place line pairs in phantom center
+        pad_width = tuple(
+            (
+                before := (self.image_shape[i] - mask.shape[i]) // 2,
+                self.image_shape[i] - mask.shape[i] - before,
+            )
+            for i in range(len(self.image_shape))
+        )
+        mask = np.pad(mask, pad_width=pad_width, mode="constant", constant_values=0)
+        mask = mask.astype(bool)
+        self.materials[mask] = self.line_material.number
+        self.densities[mask] = self.line_material.density
