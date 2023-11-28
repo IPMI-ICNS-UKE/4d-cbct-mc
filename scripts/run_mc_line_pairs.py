@@ -1,16 +1,12 @@
 import logging
 import os
-import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 import click
-import torch
 from ipmi.common.logger import init_fancy_logging
-from torch import nn
 
 from cbctmc.reconstruction.reconstruction import reconstruct_3d
-from cbctmc.utils import get_folders_by_regex
 
 # order GPU ID by PCI bus ID
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -26,16 +22,8 @@ from cbctmc.forward_projection import (
     project_forward,
     save_geometry,
 )
-from cbctmc.mc.geometry import MCGeometry, MCLinePairPhantomGeometry
+from cbctmc.mc.geometry import MCLinePairPhantomGeometry
 from cbctmc.mc.simulation import MCSimulation
-from cbctmc.segmentation.labels import LABELS
-from cbctmc.segmentation.segmenter import MCSegmenter
-from cbctmc.segmentation.utils import (
-    merge_upper_body_bone_segmentations,
-    merge_upper_body_fat_segmentations,
-    merge_upper_body_muscle_segmentations,
-)
-from cbctmc.speedup.models import FlexUNet
 
 
 @click.command()
