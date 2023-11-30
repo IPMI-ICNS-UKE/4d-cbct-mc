@@ -25,12 +25,18 @@ class MCSegmenter:
         device: TorchDevice,
         patch_shape: Tuple[int, ...] = (128, 128, 128),
         patch_overlap: float = 0.0,
+        n_labels: int = N_LABELS,
+        input_value_range: Tuple[float, float] = (-1024, 3071),
+        output_value_range: Tuple[float, float] = (0, 1),
     ):
         self.model = model.to(device)
         self.device = device
 
         self.patch_shape = patch_shape
         self.patch_overlap = patch_overlap
+        self.n_labels = n_labels
+        self.input_value_range = input_value_range
+        self.output_value_range = output_value_range
 
     def segment(self, image: np.ndarray) -> np.ndarray:
         image = np.asarray(image, dtype=np.float32)
@@ -39,8 +45,8 @@ class MCSegmenter:
 
         image = rescale_range(
             image,
-            input_range=(-1024, 3071),
-            output_range=(0, 1),
+            input_range=self.input_value_range,
+            output_range=self.output_value_range,
             clip=True,
         )
         # pad image if patch_size > image.shape
@@ -55,7 +61,7 @@ class MCSegmenter:
             color_axis=0,
         )
         stitcher = PatchStitcher(
-            array_shape=(N_LABELS, *spatial_image_shape), color_axis=0
+            array_shape=(self.n_labels, *spatial_image_shape), color_axis=0
         )
         self.model.eval()
 
