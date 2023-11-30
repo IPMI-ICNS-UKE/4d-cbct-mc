@@ -23,7 +23,7 @@ def reconstruct_3d(
     projections_filepath: PathLike,
     geometry_filepath: PathLike,
     output_folder: PathLike | None = None,
-    output_filename: PathLike | None = None,
+    output_filename: str | None = None,
     dimension: Tuple[int, int, int] = (464, 250, 464),
     spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
     pad: float = 1.0,
@@ -37,13 +37,13 @@ def reconstruct_3d(
 
     projections_filepath = Path(projections_filepath)
     geometry_filepath = Path(geometry_filepath)
-    output_folder = Path(output_folder)
 
     if not output_folder:
-        output_folder = projections_filepath.parent / "reconstruction"
+        output_folder = projections_filepath.parent / "reconstructions"
     if not output_filename:
         output_filename = f"recon_{method}.mha"
 
+    output_folder = Path(output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
 
     reconstructor = FDKReconstructor(use_docker=True, gpu_id=gpu_id)
@@ -85,10 +85,33 @@ def reconstruct_3d(
     show_default=True,
 )
 @click.option(
-    "--output-filepath",
-    help="Output filepath for the reconstruction results",
+    "--dimension",
+    help="Image dimension of the reconstruction",
+    type=click.Tuple([int, int, int]),
+    default=(464, 250, 464),
+    show_default=True,
+)
+@click.option(
+    "--spacing",
+    help="Image spacing of the reconstruction",
+    type=click.Tuple([float, float, float]),
+    default=(1.0, 1.0, 1.0),
+    show_default=True,
+)
+@click.option(
+    "--output-folder",
+    help="Output folder for the reconstruction results",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
+    required=False,
+    default=None,
+    show_default=True,
+)
+@click.option(
+    "--output-filename",
+    help="Output filename for the reconstruction results",
+    type=click.STRING,
+    required=False,
+    default="fdk3d_wpc.mha",
     show_default=True,
 )
 @click.option(
@@ -107,7 +130,10 @@ def reconstruct_3d(
 def _cli(
     projections_filepath: Path,
     geometry_filepath: Path,
-    output_filepath: Path,
+    dimension: Tuple[int, int, int],
+    spacing: Tuple[float, float, float],
+    output_folder: Path,
+    output_filename: str,
     gpu: int,
     loglevel: str,
 ):
@@ -117,15 +143,13 @@ def _cli(
     logger.setLevel(loglevel)
     init_fancy_logging()
 
-    # create output folder if not exists
-    output_filepath.parent.mkdir(parents=True, exist_ok=True)
-
     reconstruct_3d(
         projections_filepath=projections_filepath,
         geometry_filepath=geometry_filepath,
-        output_folder=output_filepath.parent,
-        output_filename="fdk3d_wpc.mha",
-        dimension=(464, 250, 464),
+        output_folder=output_folder,
+        output_filename=output_filename,
+        spacing=spacing,
+        dimension=dimension,
         water_pre_correction=ReconDefaults.wpc_catphan604,
         gpu_id=gpu,
     )
