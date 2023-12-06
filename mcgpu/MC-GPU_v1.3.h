@@ -58,7 +58,7 @@
 //! Maximum number of projections allowed in the CT simulation (not limited by the constant memory because stored in global and shared memory):
 #define  MAX_NUM_PROJECTIONS  1024
 //! Maximum number of simulation angles which are specified in the input file
-#define MAX_NUM_ANGLES 10
+#define MAX_NUM_ANGLES 1024
 
 //! Constants values for the Compton and Rayleigh models:
 #define  MAX_MATERIALS      25
@@ -193,7 +193,8 @@ struct
 #endif
 detector_struct         // Define a 2D detector plane, located in front of the defined source (centered at the focal spot and perpendicular to the initial direction).
 {                       // The radiograohic image will be stored in the global variable "unsigned long long int *image".
-  float sdd;                                // Store the source-detector distance
+  float sdd;            // Store the source-detector distance
+  float lateral_displacement; // Store the lateral displacement of the detector
   float3 corner_min_rotated_to_Y,
          center;
   float rot_inv[9],    // Rotation to transport a particle on the detector plane to a frame where the detector is perpendicular to +Y.

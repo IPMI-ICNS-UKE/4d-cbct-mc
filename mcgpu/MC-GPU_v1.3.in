@@ -29,7 +29,7 @@ run_1_selected_angles/mc-gpu_image.dat                # OUTPUT IMAGE FILE NAME
 120.0                           # SOURCE-TO-DETECTOR DISTANCE (detector set in front of the source, perpendicular to the initial direction)
 
 #[SECTION ANGLES OF PROJ v.2023-09-06]
-YES                          # DEFINE ANGLES SPECIFICALLY? [YES/NO] (otherwise number of projections and angle between Projections is used)
+NO                          # DEFINE ANGLES SPECIFICALLY? [YES/NO] (otherwise number of projections and angle between Projections is used)
 0				# 1st ANGLE OF PROJECTION
 90				# 2nd ANGLE OF PROJECTION
 180				# 3nd ANGLE OF PROJECTION

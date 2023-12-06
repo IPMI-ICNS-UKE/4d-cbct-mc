@@ -510,6 +510,7 @@ int main(int argc, char **argv)
         printf("                      source direction = (%f, %f, %f)\n", source_data[0].direction.x, source_data[0].direction.y, source_data[0].direction.z);
         printf("                  initial angle from X = %lf\n", initial_angle*RAD2DEG);
         printf("              source-detector distance = %f cm\n", detector_data[0].sdd);
+        printf("         lateral detector displacement = %f cm\n", detector_data[0].lateral_displacement);
         printf("                       detector center = (%f, %f, %f)\n", (source_data[0].position.x + source_data[0].direction.x * detector_data[0].sdd),  // Center of the detector straight ahead of the focal spot.
                                                                           (source_data[0].position.y + source_data[0].direction.y * detector_data[0].sdd),
                                                                           (source_data[0].position.z + source_data[0].direction.z * detector_data[0].sdd));
@@ -1349,7 +1350,9 @@ void read_input(int argc, char** argv, int myID, unsigned long long int* total_h
 
   // Read input fan beam polar (theta) and azimuthal (phi) aperture angles (deg):
   double phi_aperture, theta_aperture;
-  sscanf(new_line, "%lf %lf", &phi_aperture, &theta_aperture);
+  double phi_1_aperture, phi_2_aperture;
+  sscanf(new_line, "%lf %lf %lf", &phi_1_aperture, &phi_2_aperture,  &theta_aperture);
+  phi_aperture = phi_1_aperture + phi_2_aperture;
 
   if (theta_aperture > 180.0)
   {
@@ -1376,7 +1379,8 @@ void read_input(int argc, char** argv, int myID, unsigned long long int* total_h
   //     Using the algorithm used in PENMAIN.f, from penelope 2008 (by F. Salvat).
   source_data[0].cos_theta_low = (float)( cos((90.0 - 0.5*theta_aperture)*DEG2RAD) );
   source_data[0].D_cos_theta   = (float)( -2.0*source_data[0].cos_theta_low );      // Theta aperture is symetric above and below 90 deg
-  source_data[0].phi_low       = (float)( (90.0 - 0.5*phi_aperture)*DEG2RAD );
+  //source_data[0].phi_low       = (float)( (90.0 - 0.5*phi_aperture)*DEG2RAD );
+  source_data[0].phi_low       = (float)( (90.0 - phi_1_aperture)*DEG2RAD );
   source_data[0].D_phi         = (float)( phi_aperture*DEG2RAD );
   source_data[0].max_height_at_y1cm = (float) ( tan(0.5*theta_aperture*DEG2RAD) );
 
@@ -1433,6 +1437,8 @@ void read_input(int argc, char** argv, int myID, unsigned long long int* total_h
 
   new_line_ptr = fgets_trimmed(new_line, 250, file_ptr);
     sscanf(new_line, "%f", &detector_data[0].sdd);            // SOURCE-TO-DETECTOR DISTANCE [cm] (detector set in front of the source, normal to the input direction)
+  new_line_ptr = fgets_trimmed(new_line, 250, file_ptr);
+    sscanf(new_line, "%f", &detector_data[0].lateral_displacement); // LATERAL DETECTOR DISPLACEMENT [cm] (along x direction)
 
     float3 detector_center;   // Center of the detector straight ahead of the focal spot.
     detector_center.x = source_data[0].position.x + source_data[0].direction.x * detector_data[0].sdd;
@@ -1448,17 +1454,25 @@ void read_input(int argc, char** argv, int myID, unsigned long long int* total_h
       exit(-2);
     }
 
-  if ( (theta_aperture < -1.0e-7) || (phi_aperture < -1.0e-7) )   // If we enter a negative angle, the fan beam will cover exactly the detector surface.
+  if ( phi_aperture < -1.0e-7 )   // If we enter a negative angle, the fan beam will cover exactly the detector surface.
+  {
+    phi_1_aperture = atan((detector_data[0].width_X/2.0)/detector_data[0].sdd) * RAD2DEG;
+    phi_2_aperture = atan((detector_data[0].width_X/2.0)/detector_data[0].sdd) * RAD2DEG;
+    source_data[0].phi_low       = (float)( (90.0 - phi_1_aperture)*DEG2RAD );
+    source_data[0].D_phi         = (float)( phi_aperture*DEG2RAD );
+  }
+
+    if ( theta_aperture < -1.0e-7 )   // If we enter a negative angle, the fan beam will cover exactly the detector surface.
   {
     theta_aperture= 2.0 * atan(0.5*detector_data[0].height_Z/(detector_data[0].sdd)) * RAD2DEG;   // Optimum angles
-    phi_aperture  = 2.0 * atan(0.5*detector_data[0].width_X/(detector_data[0].sdd)) * RAD2DEG;
-
     source_data[0].cos_theta_low = (float)( cos((90.0 - 0.5*theta_aperture)*DEG2RAD) );
-    source_data[0].D_cos_theta   = (float)( -2.0*source_data[0].cos_theta_low );      // Theta aperture is symetric above and below 90 deg
-    source_data[0].phi_low       = (float)( (90.0 - 0.5*phi_aperture)*DEG2RAD );
-    source_data[0].D_phi         = (float)( phi_aperture*DEG2RAD );
+    source_data[0].D_cos_theta   = (float)( -2.0*source_data[0].cos_theta_low );      // Theta aperture is symetric above and below 90 deg;
     source_data[0].max_height_at_y1cm = (float) ( tan(0.5*theta_aperture*DEG2RAD) );
   }
+
+  // print final phi1 phi2 phi theta aperture
+  MASTER_THREAD printf("\n\n   >> Final fan beam aperture angles (deg): phi1 = %f, phi2 = %f, theta = %f\n", phi_1_aperture, phi_2_aperture, theta_aperture);
+
 
 
   // -- Init. [SECTION CT ANGLES OF PROJ v.2023-09-06]:
@@ -1801,11 +1815,9 @@ void read_input(int argc, char** argv, int myID, unsigned long long int* total_h
 //  detector_data[0].corner_min_rotated_to_Y.y = detector_data[0].corner_min_rotated_to_Y.y;
   detector_data[0].corner_min_rotated_to_Y.z = detector_data[0].corner_min_rotated_to_Y.z - 0.5*detector_data[0].height_Z;
 
-  detector_data[0].center.x = source_data[0].position.x + source_data[0].direction.x * detector_data[0].sdd;
-  detector_data[0].center.y = source_data[0].position.y + source_data[0].direction.y * detector_data[0].sdd;
-  detector_data[0].center.z = source_data[0].position.z + source_data[0].direction.z * detector_data[0].sdd;
-
-
+  detector_data[0].center.x = detector_center.x;
+  detector_data[0].center.y = detector_center.y;
+  detector_data[0].center.z = detector_center.z;
 
   /////////////////////////////////////////////////////////////////////////////
 
@@ -3309,6 +3321,7 @@ void set_CT_trajectory(int myID, int num_projections, double D_angle, double ang
     source_data[i].D_phi = source_data[0].D_phi;
     source_data[i].max_height_at_y1cm = source_data[0].max_height_at_y1cm;
     detector_data[i].sdd = detector_data[0].sdd;
+    detector_data[i].lateral_displacement = detector_data[0].lateral_displacement;
     detector_data[i].width_X = detector_data[0].width_X;
     detector_data[i].height_Z = detector_data[0].height_Z;
     detector_data[i].inv_pixel_size_X = detector_data[0].inv_pixel_size_X;
