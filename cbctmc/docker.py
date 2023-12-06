@@ -7,7 +7,7 @@ from typing import Sequence
 import docker
 from docker.errors import ImageNotFound
 
-DOCKER_IMAGE = "imaging:latest"
+DOCKER_IMAGE = "mcgpu:latest"
 DOCKER_HOST_PATH_PREFIX = Path("/host")
 DOCKER_MOUNTS = {"/": {"bind": str(DOCKER_HOST_PATH_PREFIX), "mode": "rw"}}
 
