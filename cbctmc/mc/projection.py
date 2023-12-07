@@ -37,7 +37,7 @@ class MCProjection:
     def _read_raw(
         filepath: PathLike,
         n_detector_pixels: Tuple[int, int],
-        n_detector_pixels_half_fan: Tuple[int, int],
+        n_detector_pixels_half_fan: Tuple[int, int] | None,
     ) -> np.ndarray:
         data = np.loadtxt(filepath, dtype=np.float64)
         data = data.astype(np.float32)
@@ -45,7 +45,8 @@ class MCProjection:
         data = data.reshape(*n_detector_pixels[::-1], 4)
         data = np.flip(data, axis=0)
 
-        data = data[:, : n_detector_pixels_half_fan[0]]
+        if n_detector_pixels_half_fan:
+            data = data[:, : n_detector_pixels_half_fan[0]]
 
         return data
 
@@ -67,9 +68,8 @@ class MCProjection:
         cls,
         filepath: PathLike,
         n_detector_pixels: Tuple[int, int] = MCDefaults.n_detector_pixels,
-        n_detector_pixels_half_fan: Tuple[
-            int, int
-        ] = MCDefaults.n_detector_pixels_half_fan,
+        n_detector_pixels_half_fan: Tuple[int, int]
+        | None = MCDefaults.n_detector_pixels_half_fan,
         detector_pixel_size: Tuple[float, float] = (0.776, 0.776),
     ) -> "MCProjection":
         logger.info(f"Load projection {filepath}")
@@ -174,13 +174,18 @@ def get_projections_from_folder(
     regex_pattern: str = r"^projection(_\d{4})?$",
     n_detector_pixels: Tuple[int, int] = MCDefaults.n_detector_pixels,
     n_detector_pixels_half_fan: Tuple[int, int] = MCDefaults.n_detector_pixels_half_fan,
-    detector_pixel_size: Tuple[float, float] = (0.776, 0.776),
+    detector_size: Tuple[float, float] = MCDefaults.detector_size,
 ) -> List[MCProjection]:
     folder = Path(folder)
 
     projection_filepaths = [
         p for p in sorted(folder.glob("*")) if re.match(regex_pattern, p.name)
     ]
+
+    detector_pixel_size = (
+        detector_size[0] / n_detector_pixels[0],
+        detector_size[1] / n_detector_pixels[1],
+    )
 
     with multiprocessing.Pool() as pool:
         projections = pool.map(

@@ -8,6 +8,8 @@ import numpy as np
 from itk import RTK as rtk
 
 from cbctmc.common_types import PathLike
+from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
+from cbctmc.defaults import DefaultVarianScanParameters as VarianDefaults
 from cbctmc.utils import rescale_range
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,7 @@ def prepare_image_for_rtk(
     input_value_range: Tuple[float, float] | None = (-1024, 3071),
     output_value_range: Tuple[float, float] | None = (0.0, 1.0),
     image_spacing: Tuple[float, float, float] | None = None,
+    origin_offset: Tuple[float, float, float] | None = None,
 ) -> itk.Image:
     """Prepares a given image for RTK (e.g. for forward projection) by
     transforming it into IEC 61217 coordinate system. The passed image has to
@@ -70,6 +73,9 @@ def prepare_image_for_rtk(
         for (n_voxels, voxel_size) in zip(image.shape, voxel_size)
     ]
 
+    if origin_offset:
+        origin = [o + oo for (o, oo) in zip(origin, origin_offset)]
+
     image.SetOrigin(origin)
 
     return image
@@ -78,8 +84,8 @@ def prepare_image_for_rtk(
 def project_forward(
     image: itk.Image,
     geometry: itk.ThreeDCircularProjectionGeometry,
-    detector_size: Tuple[int, int] = (512, 384),
-    detector_pixel_spacing: Tuple[float, float] = (0.776, 0.776),
+    detector_size: Tuple[int, int] = MCDefaults.n_detector_pixels_half_fan,
+    detector_pixel_spacing: Tuple[float, float] = VarianDefaults.detector_pixel_size,
 ) -> itk.Image[itk.F, 3]:
     """Performs a forward projection using Joseph Algorithm [1] and the given
     geometry. The default `detector_size` and `detector_pixel_spacing` are set

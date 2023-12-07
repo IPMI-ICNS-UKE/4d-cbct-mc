@@ -15,7 +15,7 @@ from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 from cbctmc.defaults import DefaultVarianScanParameters
 from cbctmc.forward_projection import create_geometry, save_geometry
-from cbctmc.mc.geometry import MCCatPhan604Geometry
+from cbctmc.mc.geometry import MCCatPhan604Geometry, MCWaterPhantomGeometry
 from cbctmc.mc.reference import REFERENCE_ROI_STATS_CATPHAN604_VARIAN
 from cbctmc.mc.simulation import MCSimulation
 from cbctmc.reconstruction.reconstruction import reconstruct_3d
@@ -35,11 +35,15 @@ logger = logging.getLogger(__name__)
     "--gpu",
     help="GPU PCI bus ID to use for simulation",
     type=int,
-    default=0,
+    default=(0,),
+    multiple=True,
     show_default=True,
 )
 @click.option(
-    "--n-projections", type=int, default=DefaultVarianScanParameters.n_projections
+    "--n-projections",
+    type=int,
+    default=DefaultVarianScanParameters.n_projections,
+    show_default=True,
 )
 @click.option(
     "--material",
@@ -64,7 +68,7 @@ logger = logging.getLogger(__name__)
     "--initial-n-histories",
     help="Initial number of histories",
     type=int,
-    default=2e9,
+    default=1e10,
     show_default=True,
 )
 @click.option(
@@ -76,14 +80,14 @@ logger = logging.getLogger(__name__)
 @click.option(
     "--upper-boundary",
     help="Upper boundary for number of histories",
-    default=3e9,
+    default=1e10,
     show_default=True,
 )
 @click.option(
     "--n-runs",
     help="Number of runs to average over for each simulation configuration",
     type=int,
-    default=3,
+    default=1,
     show_default=True,
 )
 @click.option(
@@ -121,8 +125,9 @@ def run(
     res = opt.minimize(
         function,
         x0=np.array(initial_n_histories),
-        method="Nelder-Mead",
-        bounds=[(lower_boundary, upper_boundary)],
+        method="BFGS",
+        options={"eps": initial_n_histories / 20}
+        # bounds=[(lower_boundary, upper_boundary)],
     )
 
     logger.info(f"Optimization finished with following result for n_histories: {res.x}")
@@ -132,7 +137,7 @@ def calculate_variance_deviation(
     n_histories: int,
     materials: Sequence[str],
     output_folder: Path,
-    gpu: int,
+    gpu: Sequence[int],
     n_projections: int,
     number_runs: int,
 ):
@@ -149,6 +154,9 @@ def calculate_variance_deviation(
             "angle_between_projections": 360.0 / n_projections,
             "random_seed": datetime.now().microsecond,
         }
+        logger.info(
+            f"Starting simulation {i+1}/{number_runs} with {simulation_config=}"
+        )
 
         output_folder.mkdir(parents=True, exist_ok=True)
         run_folder = f"run_{n_histories}_run_{i:02d}"
@@ -156,7 +164,7 @@ def calculate_variance_deviation(
         (output_folder / run_folder).mkdir(exist_ok=True)
 
         # # MC simulate Cat Phan 604
-        phantom = MCCatPhan604Geometry(shape=(464, 464, 250))
+        phantom = MCWaterPhantomGeometry(shape=(250, 250, 150))
         if not any((output_folder / run_folder).iterdir()):
             phantom.save_material_segmentation(
                 output_folder / run_folder / "catphan_604_materials.nii.gz"
@@ -173,8 +181,8 @@ def calculate_variance_deviation(
                 output_folder / run_folder,
                 run_air_simulation=True,
                 clean=True,
-                gpu_id=gpu,
-                **MCDefaults().geometrical_corrections,
+                gpu_ids=gpu,
+                # **MCDefaults().geometrical_corrections,
                 force_rerun=True,
             )
 
@@ -187,7 +195,7 @@ def calculate_variance_deviation(
             output_filename="fdk3d_wpc.mha",
             dimension=(464, 250, 464),
             water_pre_correction=ReconDefaults.wpc_catphan604,
-            gpu_id=gpu,
+            gpu_id=gpu[0],
         )
 
         mc_recon = sitk.ReadImage(
@@ -198,13 +206,7 @@ def calculate_variance_deviation(
         mc_recon = np.moveaxis(mc_recon, 1, -1)
         mc_recon = np.rot90(mc_recon, k=-1, axes=(0, 1))
 
-        mid_z_slice = phantom.image_shape[2] // 2
-        fig, ax = plt.subplots(1, 2, sharex=True, sharey=True)
-        ax[0].imshow(phantom.mus[..., mid_z_slice], clim=(0, 0.04))
-        ax[1].imshow(mc_recon[..., mid_z_slice], clim=(0, 0.04))
-        ax[1].set_title("MC fdk3d_wpc")
-
-        mc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
+        mc_roi_stats = MCWaterPhantomGeometry.calculate_roi_statistics(
             mc_recon,
             height_margin=2,
             radius_margin=2,
@@ -224,11 +226,12 @@ def calculate_variance_deviation(
         [reference_roi_stats[material_name]["std"] for material_name in materials]
     )
     rel_dev = (mean_roi_stats - reference_roi_stats) / reference_roi_stats
+    rel_dev = np.abs(rel_dev)
     mean_rel_dev = np.mean(rel_dev)
 
     logger.info(f"Current deviation: {mean_rel_dev} for {n_histories} histories")
 
-    return np.abs(mean_rel_dev)
+    return mean_rel_dev
 
 
 if __name__ == "__main__":

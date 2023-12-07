@@ -40,7 +40,6 @@ class MCSimulation:
         source_direction_cosines: Tuple[
             float, float, float
         ] = MCDefaults.source_direction_cosines,
-        source_aperture: Tuple[float, float] = MCDefaults.source_aperture,
         n_detector_pixels: Tuple[int, int] = MCDefaults.n_detector_pixels,
         detector_size: Tuple[float, float] = MCDefaults.detector_size,
         source_to_detector_distance: float = MCDefaults.source_to_detector_distance,
@@ -54,34 +53,40 @@ class MCSimulation:
         self.n_projections = n_projections
         self.angle_between_projections = angle_between_projections
         self.source_direction_cosines = source_direction_cosines
-        self.source_aperture = source_aperture
         self.n_detector_pixels = n_detector_pixels
         self.detector_size = detector_size
         self.source_to_detector_distance = source_to_detector_distance
         self.source_to_isocenter_distance = source_to_isocenter_distance
         self.random_seed = random_seed
 
-    def run_air_simulation(self, output_folder: PathLike):
+    def run_air_simulation(
+        self,
+        output_folder: PathLike,
+        n_histories: int = int(5e10),
+        gpu_ids: Sequence[int] | int = 0,
+    ):
         logger.info("Run air simulation")
         output_folder = Path(output_folder) / MCSimulation._AIR_SIMULATION_FOLDER
         air_geometry = MCAirGeometry()
         simulation = MCSimulation(
-            geometry=air_geometry, n_histories=int(2.4e10), n_projections=1
+            geometry=air_geometry, n_histories=n_histories, n_projections=1
         )
-        simulation.run_simulation(output_folder, run_air_simulation=False)
+        simulation.run_simulation(
+            output_folder, gpu_ids=gpu_ids, run_air_simulation=False
+        )
 
     def _already_simulated(self, output_folder: PathLike) -> bool:
         output_folder = Path(output_folder)
-        # simply check if simulation output_folder is not empty
-        return output_folder.is_dir() and any(output_folder.iterdir())
+        # check if projections are already present
+        return (output_folder / "projections_total.mha").is_file()
 
     def run_simulation(
         self,
         output_folder: PathLike,
         run_air_simulation: bool = True,
-        air_projection_denoise_kernel_size: Tuple[int, int] | None = (5, 5),
+        air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
         clean: bool = True,
-        gpu_id: int = 0,
+        gpu_ids: Sequence[int] | int = 0,
         force_rerun: bool = False,
         force_geometry_recompile: bool = False,
         source_position_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0),
@@ -100,7 +105,7 @@ class MCSimulation:
             output_folder.mkdir(parents=True)
 
         if run_air_simulation:
-            self.run_air_simulation(output_folder)
+            self.run_air_simulation(output_folder, gpu_ids=gpu_ids)
 
         input_filepath = output_folder / "input.in"
         geometry_filepath = output_folder / "geometry.vox.gz"
@@ -140,7 +145,6 @@ class MCSimulation:
             n_projections=self.n_projections,
             angle_between_projections=self.angle_between_projections,
             source_direction_cosines=self.source_direction_cosines,
-            source_aperture=self.source_aperture,
             n_detector_pixels=self.n_detector_pixels,
             detector_size=self.detector_size,
             source_to_detector_distance=self.source_to_detector_distance
@@ -154,19 +158,19 @@ class MCSimulation:
 
         i_projection = 0
         container = None
+        gpu_ids = (gpu_ids,) if isinstance(gpu_ids, int) else gpu_ids
         try:
             logger.info("Starting MC simulation in Docker container")
-            progress_bar = tqdm(
-                desc="Simulating MC projections",
-                total=self.n_projections,
-                logger=logger,
-            )
+
             container = execute_in_docker(
                 cli_command=[
+                    "mpirun",
+                    "-n",
+                    str(len(gpu_ids)),
                     "MC-GPU_v1.3.x",
                     str(docker_input_filepath),
                 ],
-                gpus=(gpu_id,),
+                gpus=gpu_ids,
             )
 
             progress_pattern = re.compile(
@@ -174,6 +178,11 @@ class MCSimulation:
                 r"(?P<i_projection>\d{1,4}) of (?P<n_projections>\d{1,4})"
             )
             error_pattern = re.compile(r"(?i)error")
+            progress_bar = tqdm(
+                desc="Simulating MC projections",
+                total=self.n_projections,
+                logger=logger,
+            )
             with open(output_folder / "run.log", "wt") as f:
                 for log_line in container.logs(stream=True):
                     log_line = log_line.decode()
@@ -183,10 +192,7 @@ class MCSimulation:
                     # check for simulation progress
                     if match := progress_pattern.search(log_line):
                         _i_projection = int(match.groupdict()["i_projection"])
-                        if _i_projection > i_projection:
-                            diff = _i_projection - i_projection
-                            progress_bar.update(diff)
-                            i_projection = _i_projection
+                        progress_bar.update(1)
 
                     # check for errors
                     if error_pattern.search(log_line):
@@ -215,7 +221,7 @@ class MCSimulation:
         folder: PathLike,
         clean: bool = True,
         air_normalization: bool = True,
-        air_projection_denoise_kernel_size: Tuple[int, int] | None = (5, 5),
+        air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
     ):
         folder = Path(folder)
         projections = get_projections_from_folder(folder)
@@ -265,14 +271,18 @@ class MCSimulation:
         source_position: Tuple[float, float, float],
         output_folder: PathLike,
         n_histories: int = MCDefaults.n_histories,
+        specify_projection_angles: bool = MCDefaults.specify_projection_angles,
+        projection_angles: Sequence[float] = MCDefaults.projection_angles,
         n_projections: int = MCDefaults.n_projections,
         angle_between_projections: float = MCDefaults.angle_between_projections,
         source_direction_cosines: Tuple[
             float, float, float
         ] = MCDefaults.source_direction_cosines,
-        source_aperture: Tuple[float, float] = MCDefaults.source_aperture,
+        source_polar_aperture: Tuple[float, float] = MCDefaults.source_polar_aperture,
+        source_azimuthal_aperture: float = MCDefaults.source_azimuthal_aperture,
         n_detector_pixels: Tuple[int, int] = MCDefaults.n_detector_pixels,
         detector_size: Tuple[float, float] = MCDefaults.detector_size,
+        detector_lateral_displacement: float = MCDefaults.detector_lateral_displacement,
         source_to_detector_distance: float = MCDefaults.source_to_detector_distance,
         source_to_isocenter_distance: float = MCDefaults.source_to_isocenter_distance,
         random_seed: int = MCDefaults.random_seed,
@@ -282,15 +292,21 @@ class MCSimulation:
             "angle_between_projections": angle_between_projections,
             "detector_size_x": round(detector_size[0] / 10.0, 6),
             "detector_size_y": round(detector_size[1] / 10.0, 6),
+            "detector_lateral_displacement": round(
+                detector_lateral_displacement / 10.0, 6
+            ),
             "material_filepaths": [str(path) for path in material_filepaths],
             "n_detector_pixels_x": n_detector_pixels[0],
             "n_detector_pixels_y": n_detector_pixels[1],
             "n_histories": n_histories,
+            "specify_projection_angles": "YES" if specify_projection_angles else "NO",
+            "projection_angles": projection_angles if specify_projection_angles else [],
             "n_projections": n_projections,
             "output_folder": str(output_folder),
             "random_seed": random_seed,
-            "source_polar_aperture": source_aperture[0],
-            "source_azimuthal_aperture": source_aperture[1],
+            "source_polar_aperture_1": source_polar_aperture[0],
+            "source_polar_aperture_2": source_polar_aperture[1],
+            "source_azimuthal_aperture": source_azimuthal_aperture,
             "source_direction_cosine_u": source_direction_cosines[0],
             "source_direction_cosine_v": source_direction_cosines[1],
             "source_direction_cosine_w": source_direction_cosines[2],

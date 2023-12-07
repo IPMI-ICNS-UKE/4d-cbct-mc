@@ -19,7 +19,7 @@ def hash_path(path: Path) -> str:
     return hashlib.sha1(str(path).encode()).hexdigest()
 
 
-def iec61217_to_rsp(image):
+def iec61217_to_rsp(image: sitk.Image) -> sitk.Image:
     size = image.GetSize()
     spacing = image.GetSpacing()
     dimension = image.GetDimension()
@@ -44,6 +44,8 @@ def iec61217_to_rsp(image):
         origin = np.add(
             origin, (spacing[0] / 2, -spacing[1] / 2, -spacing[2] / 2, spacing[0] / 2)
         )
+    else:
+        raise RuntimeError(f"Dimension {dimension} not supported")
 
     image.SetOrigin(origin)
 

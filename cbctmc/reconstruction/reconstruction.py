@@ -6,17 +6,13 @@ from typing import Sequence, Tuple
 
 import click
 import yaml
-from ipmi.common.logger import init_fancy_logging
-from ipmi.reconstruction.cbct.reconstructors import FDKReconstructor
 
 from cbctmc.common_types import PathLike
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
+from cbctmc.logger import init_fancy_logging
+from cbctmc.reconstruction.reconstructors import FDKReconstructor
 
 logger = logging.getLogger(__name__)
-init_fancy_logging()
-
-logging.getLogger(__name__).setLevel(logging.DEBUG)
-logging.getLogger("ipmi").setLevel(logging.DEBUG)
 
 
 def reconstruct_3d(

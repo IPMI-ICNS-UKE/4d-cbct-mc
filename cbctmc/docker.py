@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
-import docker
 from docker.errors import ImageNotFound
 
-DOCKER_IMAGE = "mcgpu:latest"
+import docker
+
+logger = logging.getLogger(__name__)
+
+DOCKER_IMAGE = "cbct-mc:latest"
 DOCKER_HOST_PATH_PREFIX = Path("/host")
 DOCKER_MOUNTS = {"/": {"bind": str(DOCKER_HOST_PATH_PREFIX), "mode": "rw"}}
 
@@ -29,6 +33,7 @@ def execute_in_docker(
     docker_image: str = DOCKER_IMAGE,
     mounts: dict = DOCKER_MOUNTS,
     gpus: Sequence[int] | None = None,
+    detach: bool = True,
     **kwargs,
 ) -> docker.models.containers.Container:
     device_requests = []
@@ -41,7 +46,7 @@ def execute_in_docker(
     uid = os.getuid()
     gid = os.getgid()
     client = docker.from_env()
-    conrainer = client.containers.run(
+    container = client.containers.run(
         image=docker_image,
         command=cli_command,
         remove=True,
@@ -50,7 +55,11 @@ def execute_in_docker(
         user=f"{uid}:{gid}",
         stdout=True,
         stderr=True,
-        detach=True,
+        detach=detach,
         **kwargs,
     )
-    return conrainer
+    if detach:
+        logger.debug(
+            f"Started detached container {container.name} (image: {docker_image}) with command: {cli_command}"
+        )
+    return container

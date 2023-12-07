@@ -11,13 +11,20 @@
 {{ xray_spectrum_filepath }}  # X-RAY ENERGY SPECTRUM FILE
 {{ source_position_x }} {{ source_position_y }} {{ source_position_z }}  # SOURCE POSITION: X Y Z [cm]
 {{ source_direction_cosine_u }} {{ source_direction_cosine_v }} {{ source_direction_cosine_w }}  # SOURCE DIRECTION COSINES: U V W
-{{ source_polar_aperture }} {{ source_azimuthal_aperture }}  # POLAR AND AZIMUTHAL APERTURES FOR THE FAN BEAM [degrees] (input negative to cover the whole detector)
+{{ source_polar_aperture_1 }} {{ source_polar_aperture_2 }} {{ source_azimuthal_aperture }}  # POLAR (PHI 1, PHI 2) AND AZIMUTHAL (THETA) APERTURES FOR THE FAN BEAM [degrees] (input negative to cover the whole detector)
 
 #[SECTION IMAGE DETECTOR v.2009-12-02]
 {{ output_folder }}/projection  # OUTPUT IMAGE FILE NAME
 {{ n_detector_pixels_x }} {{ n_detector_pixels_y }}  # NUMBER OF PIXELS IN THE IMAGE: Nx Nz
 {{ detector_size_x }} {{ detector_size_y }}  # IMAGE SIZE (width, height): Dx Dz [cm]
 {{ source_to_detector_distance }}  # SOURCE-TO-DETECTOR DISTANCE (detector set in front of the source, perpendicular to the initial direction)
+{{ detector_lateral_displacement }}  # LATERAL DETECTOR DISPLACEMENT (along x axis [cm])
+
+#[SECTION ANGLES OF PROJ v.2023-09-06]
+{{ specify_projection_angles }}  # DEFINE ANGLES SPECIFICALLY? [YES/NO] (otherwise number of projections and angle between projections is used)
+{%- for projection_angle in projection_angles %}
+{{ projection_angle }}  # PROJECTION ANGLE {{ loop.index }}
+{%- endfor %}
 
 #[SECTION CT SCAN TRAJECTORY v.2011-10-25]
 {{ n_projections }}  # NUMBER OF PROJECTIONS (beam must be perpendicular to Z axis, set to 1 for a single projection)

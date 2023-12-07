@@ -4,16 +4,21 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Optional
 
-import docker
 import numpy as np
 import SimpleITK as sitk
 from docker.errors import ImageNotFound
-from ipmi.reconstruction.helper import iec61217_to_rsp
 
-from cbctmc import defaults
+import docker
 from cbctmc.common_types import PathLike
-from cbctmc.docker import DOCKER_IMAGE, check_image_exists, execute_in_docker
+from cbctmc.docker import (
+    DOCKER_HOST_PATH_PREFIX,
+    DOCKER_IMAGE,
+    check_image_exists,
+    execute_in_docker,
+)
 from cbctmc.logger import LoggerMixin
+from cbctmc.shell import create_cli_command, execute
+from cbctmc.utils import iec61217_to_rsp
 
 
 class Reconstructor(ABC, LoggerMixin):
@@ -39,7 +44,7 @@ class Reconstructor(ABC, LoggerMixin):
     @property
     def _execute_function(self):
         execute_func = (
-            partial(execute_in_docker, gpus=[self.gpu_id])
+            partial(execute_in_docker, gpus=[self.gpu_id], detach=False)
             if self.use_docker
             else partial(execute, gpus=[self.gpu_id])
         )
@@ -89,7 +94,7 @@ class RTKReconstructor(Reconstructor):
         bin_call = create_cli_command(
             self.executable,
             output=output_filepath,
-            path_prefix=defaults.DOCKER_PATH_PREFIX if self.use_docker else None,
+            path_prefix=DOCKER_HOST_PATH_PREFIX if self.use_docker else None,
             convert_underscore=None,
             verbose=True,
             **kwargs,

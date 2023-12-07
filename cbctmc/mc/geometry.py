@@ -12,9 +12,11 @@ from typing import List, Sequence, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 import pkg_resources
+import scipy.ndimage as ndi
 import SimpleITK as sitk
 import torch.nn as nn
 from jinja2 import Environment, FileSystemLoader
+from scipy.ndimage import filters
 
 from cbctmc.common_types import FloatTuple3D, PathLike
 from cbctmc.mc.dataio import save_text_file
@@ -135,23 +137,29 @@ class BoneMaterialMapper(BaseMultiMaterialMapper):
     def _create_segmentation_material_pairs(
         self,
         image: np.ndarray,
-        segmentation: Sequence[np.ndarray],
+        segmentation: np.ndarray,
     ) -> List[Tuple[np.ndarray, Material]]:
-        mask = segmentation > 0
+        mask: np.ndarray = segmentation > 0
+
+        # generate a mask for the 1 voxel outline of the mask
+        eroded_mask = ndi.binary_erosion(mask)
+        outline_mask = mask & ~eroded_mask
+
+        bone_100_mask = outline_mask & (image >= 300)
+        bone_050_mask = mask & (image >= 300)
+        bone_020_mask = mask & (150 <= image) & (image < 300)
+        red_marrow_mask = mask & (image < 150)
 
         # bone_100_mask = mask & (image >= 400)
         # bone_050_mask = mask & (300 <= image) & (image < 400)
         # bone_020_mask = mask & (150 <= image) & (image < 300)
         # red_marrow_mask = mask & (image < 150)
 
-        bone_050_mask = mask & (400 <= image)
-        bone_020_mask = mask & (150 <= image) & (image < 400)
-        red_marrow_mask = mask & (image < 150)
-
         return [
-            (bone_050_mask, MATERIALS_125KEV["bone_050"]),
-            (bone_020_mask, MATERIALS_125KEV["bone_020"]),
             (red_marrow_mask, MATERIALS_125KEV["red_marrow"]),
+            (bone_020_mask, MATERIALS_125KEV["bone_020"]),
+            (bone_050_mask, MATERIALS_125KEV["bone_050"]),
+            (bone_100_mask, MATERIALS_125KEV["bone_100"]),
         ]
 
 
@@ -753,15 +761,34 @@ class MCWaterPhantomGeometry(MCGeometry, CylindricalPhantomMixin):
             "angle": 0.0,
             "distance": 0.0,
             "radius": 100.0,
-            "length": 100.0,
+            "length": 150.0,
         }
+    }
+
+    SENSITOMETRY_ROIS = {
+        "water": {
+            "material": MATERIALS_125KEV["h2o"],
+            "angle": 0,
+            "distance": 0,
+            "radius": 30,
+            "length": 40,
+        },
     }
 
     def __init__(
         self,
         shape: Tuple[int, int, int] = (500, 500, 500),
         image_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+        radius: float | None = None,
+        length: float | None = None,
     ):
+        # check if image spacing is isotropic
+        if len(set(image_spacing)) > 1:
+            raise ValueError("Image spacing must be isotropic")
+
+        self.image_spacing = image_spacing
+        self.isotropic_image_spacing = image_spacing[0]
+
         phantom_center = np.array(shape) / 2
 
         air_material = MATERIALS_125KEV["air"]
@@ -777,8 +804,8 @@ class MCWaterPhantomGeometry(MCGeometry, CylindricalPhantomMixin):
             roi_mask = MCCatPhan604Geometry.cylindrical_mask(
                 shape=shape,
                 center=roi_center,
-                radius=roi["radius"],
-                height=roi["length"],
+                radius=(radius or roi["radius"]) / self.isotropic_image_spacing,
+                height=(length or roi["length"]) / self.isotropic_image_spacing,
             )
 
             materials[roi_mask] = roi["material"].number
@@ -788,35 +815,77 @@ class MCWaterPhantomGeometry(MCGeometry, CylindricalPhantomMixin):
             materials=materials, densities=densities, image_spacing=image_spacing
         )
 
+    @staticmethod
+    def calculate_roi_statistics(
+        image: np.ndarray,
+        radius_margin: float = 1.0,
+        height_margin: float = 5.0,
+    ):
+        phantom_center = np.array(image.shape) / 2
+        results = {}
+        for roi_name, roi in MCWaterPhantomGeometry.SENSITOMETRY_ROIS.items():
+            # convert to rad
+            phi = roi["angle"] * np.pi / 180.0
+            roi_center = np.array([np.cos(phi), -np.sin(phi), 0.0])
+            roi_center = (roi_center * roi["distance"]) + phantom_center
+
+            roi_mask = MCCatPhan604Geometry.cylindrical_mask(
+                shape=image.shape,
+                center=roi_center,
+                radius=roi["radius"] - radius_margin,
+                height=roi["length"] - 2 * height_margin,
+            )
+            roi = image[roi_mask]
+            stats = {
+                "min": float(np.min(roi)),
+                "max": float(np.max(roi)),
+                "mean": float(np.mean(roi)),
+                "p25": float(np.percentile(roi, 25)),
+                "p50": float(np.percentile(roi, 50)),
+                "p75": float(np.percentile(roi, 75)),
+                "std": float(np.std(roi)),
+                "evaluated_voxels": roi.size,
+            }
+
+            results[roi_name] = stats
+        return results
+
 
 class MCLinePairPhantomGeometry(MCWaterPhantomGeometry):
     def __init__(
         self,
-        line_spacing_factor: int,
-        line_material: Material = MATERIALS_125KEV["air"],
+        line_gap: int,
+        line_material: Material = MATERIALS_125KEV["aluminium"],
+        radius: float | None = None,
+        length: float | None = None,
         shape: Tuple[int, int, int] = (500, 500, 500),
         image_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
     ):
-        super().__init__(shape=shape, image_spacing=image_spacing)
+        super().__init__(
+            shape=shape, image_spacing=image_spacing, radius=radius, length=length
+        )
+        # check if line gap is a multiple of the image spacing
+        if line_gap % self.image_spacing[0] != 0:
+            raise ValueError("Line gap must be a multiple of the image spacing")
 
-        self.line_spacing_factor = line_spacing_factor
+        self.line_gap_voxels = int(line_gap / self.isotropic_image_spacing)
         self.line_material = line_material
         self.n_lines = 4
-        self.line_depth = 20
+        self.line_depth_voxels = int(20 / self.isotropic_image_spacing)
 
         self._add_line_pairs()
 
     def _create_line_pair_mask(self):
         mask = np.zeros(
             (
-                ((2 * self.n_lines - 1) * self.line_spacing_factor),
-                self.line_depth,
-                self.line_depth,
+                ((2 * self.n_lines - 1) * self.line_gap_voxels),
+                self.line_depth_voxels,
+                self.line_depth_voxels,
             )
         )
 
-        for i in range(0, mask.shape[0], 2 * self.line_spacing_factor):
-            mask[i : i + self.line_spacing_factor] = 1
+        for i in range(0, mask.shape[0], 2 * self.line_gap_voxels):
+            mask[i : i + self.line_gap_voxels] = 1
 
         return mask
 
@@ -835,3 +904,14 @@ class MCLinePairPhantomGeometry(MCWaterPhantomGeometry):
         mask = mask.astype(bool)
         self.materials[mask] = self.line_material.number
         self.densities[mask] = self.line_material.density
+
+
+if __name__ == "__main__":
+    geometry = MCLinePairPhantomGeometry(
+        line_gap=4,
+        image_spacing=(0.25, 0.25, 0.25),
+        radius=30,
+        length=30,
+        shape=(250, 250, 125),
+    )
+    geometry.save_density_image("/datalake2/mc_test/geometry_densities.nii.gz")
