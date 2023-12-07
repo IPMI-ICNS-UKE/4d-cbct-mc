@@ -1,6 +1,6 @@
 #
 #  125 kVp Tungsten  0.89 mm Ti filtration
-#  This is the Varian CBCT spectrum
+#  This is the Varian CBCT spectrum calculated by Boone
 #
 #
 #  Energy [eV]    Photons per (mA*s*mm^2) (at 750 mm)
