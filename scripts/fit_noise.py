@@ -112,7 +112,7 @@ def run(
         function,
         x0=np.array(initial_n_histories),
         method="BFGS",
-        options={"eps": initial_n_histories / 10},
+        options={"eps": initial_n_histories / 100},
     )
 
     logger.info(f"Optimization finished with following result for n_histories: {res.x}")
