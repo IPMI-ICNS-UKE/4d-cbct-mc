@@ -111,7 +111,7 @@ def run(
     res = opt.minimize(
         function,
         x0=np.array(initial_n_histories),
-        method="BFGS",
+        method="Nelder-Mead",
     )
 
     logger.info(f"Optimization finished with following result for n_histories: {res.x}")
