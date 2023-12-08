@@ -72,18 +72,6 @@ logger = logging.getLogger(__name__)
     show_default=True,
 )
 @click.option(
-    "--lower-boundary",
-    help="Lower boundary for number of histories",
-    default=1e8,
-    show_default=True,
-)
-@click.option(
-    "--upper-boundary",
-    help="Upper boundary for number of histories",
-    default=1e10,
-    show_default=True,
-)
-@click.option(
     "--n-runs",
     help="Number of runs to average over for each simulation configuration",
     type=int,
@@ -98,12 +86,10 @@ logger = logging.getLogger(__name__)
 )
 def run(
     output_folder: Path,
-    gpu: int,
+    gpu: Sequence[int],
     n_projections: int,
     material: Sequence[str],
     initial_n_histories: int,
-    lower_boundary: int,
-    upper_boundary: int,
     n_runs: int,
     loglevel: str,
 ):
@@ -126,8 +112,7 @@ def run(
         function,
         x0=np.array(initial_n_histories),
         method="BFGS",
-        options={"eps": initial_n_histories / 20}
-        # bounds=[(lower_boundary, upper_boundary)],
+        options={"eps": initial_n_histories / 10},
     )
 
     logger.info(f"Optimization finished with following result for n_histories: {res.x}")

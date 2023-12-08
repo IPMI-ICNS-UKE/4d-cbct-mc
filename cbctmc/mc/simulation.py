@@ -94,12 +94,15 @@ class MCSimulation:
         source_to_isocenter_distance_offset: float = 0.0,
     ):
         output_folder = Path(output_folder)
+        gpu_ids = (gpu_ids,) if isinstance(gpu_ids, int) else gpu_ids
 
         if self._already_simulated(output_folder) and not force_rerun:
             logger.info(
                 f"Output folder {output_folder} is not empty, skipping simulation"
             )
             return
+
+        logger.debug(f"Running simulation on {len(gpu_ids)} GPUs: {gpu_ids}")
 
         if not output_folder.is_dir():
             output_folder.mkdir(parents=True)
@@ -152,19 +155,22 @@ class MCSimulation:
             source_to_isocenter_distance=self.source_to_isocenter_distance
             + source_to_isocenter_distance_offset,
             random_seed=self.random_seed,
+            gpu_ids=gpu_ids,
         )
 
         MCSimulation.save_mcgpu_input(mcgpu_input, output_filepath=input_filepath)
 
         i_projection = 0
         container = None
-        gpu_ids = (gpu_ids,) if isinstance(gpu_ids, int) else gpu_ids
+
         try:
             logger.info("Starting MC simulation in Docker container")
 
             container = execute_in_docker(
                 cli_command=[
                     "mpirun",
+                    "--tag-output",
+                    "-v",
                     "-n",
                     str(len(gpu_ids)),
                     "MC-GPU_v1.3.x",
@@ -286,9 +292,12 @@ class MCSimulation:
         source_to_detector_distance: float = MCDefaults.source_to_detector_distance,
         source_to_isocenter_distance: float = MCDefaults.source_to_isocenter_distance,
         random_seed: int = MCDefaults.random_seed,
+        gpu_ids: Sequence[int] = (0,),
     ) -> str:
         # Note: MC-GPU uses cm instead of mm (thus dividing by 10)
+        # cf. input template for documentation
         params = {
+            "gpu_id": -1 if len(gpu_ids) > 1 else gpu_ids[0],
             "angle_between_projections": angle_between_projections,
             "detector_size_x": round(detector_size[0] / 10.0, 6),
             "detector_size_y": round(detector_size[1] / 10.0, 6),
