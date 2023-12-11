@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -23,7 +24,12 @@ from cbctmc.reconstruction.reconstruction import reconstruct_3d
 logger = logging.getLogger(__name__)
 
 
-@click.command()
+@click.group()
+def cli():
+    pass
+
+
+@cli.command()
 @click.option(
     "--output-folder",
     help="Output folder for (intermediate) results",
@@ -218,5 +224,55 @@ def calculate_variance_deviation(
     return mean_rel_dev
 
 
+@cli.command()
+@click.argument(
+    "folder", type=click.Path(file_okay=False, dir_okay=True, path_type=Path)
+)
+@click.option(
+    "--reference",
+    type=str,
+    default="water",
+    show_default=True,
+)
+def plot(folder: Path, reference: str = "water"):
+    n_histories = []
+    noises = []
+    reference_noise = REFERENCE_ROI_STATS_CATPHAN604_VARIAN[reference]["std"]
+    for simulation in folder.glob("run*"):
+        # read input.in as text and extract n_histories
+        with open(str(simulation / "input.in"), "rt") as f:
+            input_content = f.read()
+        match = re.search("(\d+)\s+# TOTAL NUMBER OF HISTORIES", input_content)
+        n_histories.append(int(match.group(1)))
+
+        with open(
+            str(simulation / "reconstructions" / f"roi_stats.json"),
+            "rt",
+        ) as file:
+            roi_stats = json.load(file)
+        noises.append(roi_stats[reference]["std"])
+
+    # sort by n_histories
+    n_histories, noises = zip(*sorted(zip(n_histories, noises)))
+    n_histories = np.array(n_histories)
+    noises = np.array(noises)
+    best_n_histories = n_histories[np.argmin(np.abs(noises - reference_noise))]
+    print("n_histories\tnoise")
+    for _n_histories, noise in zip(n_histories, noises):
+        print(f"{_n_histories}\t{noise}")
+    print("-" * 80)
+    print(f"reference noise ({reference}):", reference_noise)
+    print(f"best n_histories:", best_n_histories)
+
+    fig, ax = plt.subplots()
+    ax.plot(n_histories, noises)
+    ax.axhline(
+        y=reference_noise,
+        color="r",
+        linestyle="-",
+    )
+    plt.show()
+
+
 if __name__ == "__main__":
-    run()
+    cli()
