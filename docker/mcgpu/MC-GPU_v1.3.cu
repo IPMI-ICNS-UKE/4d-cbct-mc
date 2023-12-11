@@ -2910,45 +2910,45 @@ int report_image(char* file_name_output, struct detector_struct* detector_data, 
   fflush(stdout);
 
 
-  // -- Binary output:
-  float energy_float;
-  char file_binary[250];
-  strncpy (file_binary, file_name_output, 250);
-  strcat(file_binary,".raw");                       // !!BINARY!!
-  FILE* file_binary_ptr = fopen(file_binary, "w");  // !!BINARY!!
-  if (file_binary_ptr==NULL)
-  {
-    printf("\n\n   !!fopen ERROR report_image!! Binary file %s can not be opened for writing!!\n", file_binary);
-    exit(-3);
-  }
-
-  for(i=0; i<pixels_per_image; i++)
-  {
-    energy_float = (float)( NORM * (double)(image[i] + image[i + pixels_per_image] + image[i + 2*pixels_per_image] + image[i + 3*pixels_per_image]) );  // Total image (scatter + primary)
-    fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);   // Write pixel data in a binary file that can be easyly open in imageJ. !!BINARY!!
-  }
-  for(i=0; i<pixels_per_image; i++)
-  {
-    energy_float = (float)( NORM * (double)(image[i]) );  // Non-scattered image
-    fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);
-  }
-  for(i=0; i<pixels_per_image; i++)
-  {
-    energy_float = (float)( NORM * (double)(image[i + pixels_per_image]) );  // Compton image
-    fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);
-  }
-  for(i=0; i<pixels_per_image; i++)
-  {
-    energy_float = (float)( NORM * (double)(image[i + 2*pixels_per_image]) );  // Rayleigh image
-    fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);
-  }
-  for(i=0; i<pixels_per_image; i++)
-  {
-    energy_float = (float)( NORM * (double)(image[i + 3*pixels_per_image]) );  // Multiple-scatter image
-    fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);
-  }
-
-  fclose(file_binary_ptr);
+//   -- Binary output for, e.g., ImageJ. Currently not used.
+//   float energy_float;
+//   char file_binary[250];
+//   strncpy (file_binary, file_name_output, 250);
+//   strcat(file_binary,".raw");                       // !!BINARY!!
+//   FILE* file_binary_ptr = fopen(file_binary, "w");  // !!BINARY!!
+//   if (file_binary_ptr==NULL)
+//   {
+//     printf("\n\n   !!fopen ERROR report_image!! Binary file %s can not be opened for writing!!\n", file_binary);
+//     exit(-3);
+//   }
+//
+//   for(i=0; i<pixels_per_image; i++)
+//   {
+//     energy_float = (float)( NORM * (double)(image[i] + image[i + pixels_per_image] + image[i + 2*pixels_per_image] + image[i + 3*pixels_per_image]) );  // Total image (scatter + primary)
+//     fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);   // Write pixel data in a binary file that can be easyly open in imageJ. !!BINARY!!
+//   }
+//   for(i=0; i<pixels_per_image; i++)
+//   {
+//     energy_float = (float)( NORM * (double)(image[i]) );  // Non-scattered image
+//     fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);
+//   }
+//   for(i=0; i<pixels_per_image; i++)
+//   {
+//     energy_float = (float)( NORM * (double)(image[i + pixels_per_image]) );  // Compton image
+//     fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);
+//   }
+//   for(i=0; i<pixels_per_image; i++)
+//   {
+//     energy_float = (float)( NORM * (double)(image[i + 2*pixels_per_image]) );  // Rayleigh image
+//     fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);
+//   }
+//   for(i=0; i<pixels_per_image; i++)
+//   {
+//     energy_float = (float)( NORM * (double)(image[i + 3*pixels_per_image]) );  // Multiple-scatter image
+//     fwrite(&energy_float, sizeof(float), 1, file_binary_ptr);
+//   }
+//
+//   fclose(file_binary_ptr);
 
 
   return 0;     // Report could return not 0 to continue the simulation...
