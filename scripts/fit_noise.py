@@ -3,7 +3,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, Tuple
 
 import click
 import matplotlib.pyplot as plt
@@ -71,6 +71,13 @@ def cli():
     show_default=True,
 )
 @click.option(
+    "--optimize",
+    help="Optimize number of histories automatically",
+    is_flag=True,
+    default=False,
+    show_default=True,
+)
+@click.option(
     "--initial-n-histories",
     help="Initial number of histories",
     type=int,
@@ -78,7 +85,22 @@ def cli():
     show_default=True,
 )
 @click.option(
-    "--n-runs",
+    "--n-histories-range",
+    help="Range of number of histories to run simulations over",
+    type=int,
+    nargs=2,
+    default=(5e8, 5e10),
+    show_default=True,
+)
+@click.option(
+    "--n-simulations",
+    help="Number of simulations to run over the n-histories-range",
+    type=int,
+    default=10,
+    show_default=True,
+)
+@click.option(
+    "--n-runs-per-setting",
     help="Number of runs to average over for each simulation configuration",
     type=int,
     default=1,
@@ -95,8 +117,11 @@ def run(
     gpu: Sequence[int],
     n_projections: int,
     material: Sequence[str],
+    optimize: bool,
     initial_n_histories: int,
-    n_runs: int,
+    n_histories_range: Tuple[int, int],
+    n_simulations: int,
+    n_runs_per_setting: int,
     loglevel: str,
 ):
     # set up logging
@@ -104,23 +129,39 @@ def run(
     logging.getLogger("cbctmc").setLevel(loglevel)
     logger.setLevel(loglevel)
     init_fancy_logging()
-
-    logger.info(f"Starting noise optimization using meterials {material}")
-    function = lambda x: calculate_variance_deviation(
-        n_histories=int(x),
-        materials=material,
-        output_folder=output_folder,
-        gpu=gpu,
-        n_projections=n_projections,
-        number_runs=n_runs,
-    )
-    res = opt.minimize(
-        function,
-        x0=np.array(initial_n_histories),
-        method="Nelder-Mead",
-    )
-
-    logger.info(f"Optimization finished with following result for n_histories: {res.x}")
+    logger.info(f"Starting noise runs using material {material}")
+    if optimize:
+        logger.info("Optimizing number of histories")
+        function = lambda x: calculate_variance_deviation(
+            n_histories=int(x),
+            materials=material,
+            output_folder=output_folder,
+            gpu=gpu,
+            n_projections=n_projections,
+            number_runs=n_runs_per_setting,
+        )
+        res = opt.minimize(
+            function,
+            x0=np.array(initial_n_histories),
+            method="Nelder-Mead",
+        )
+        logger.info(
+            f"Optimization finished with following result for n_histories: {res.x}"
+        )
+    else:
+        n_histories = np.linspace(
+            n_histories_range[0], n_histories_range[1], n_simulations, dtype=int
+        )
+        logger.info(f"Running simulations for following n_histories: {n_histories}")
+        for _n_histories in n_histories:
+            calculate_variance_deviation(
+                n_histories=_n_histories,
+                materials=material,
+                output_folder=output_folder,
+                gpu=gpu,
+                n_projections=n_projections,
+                number_runs=n_runs_per_setting,
+            )
 
 
 def calculate_variance_deviation(
