@@ -152,18 +152,16 @@ def run(
         n_histories = np.linspace(
             n_histories_range[0], n_histories_range[1], n_simulations, dtype=int
         )
-        plt.plot(n_histories)
-        plt.show()
         logger.info(f"Running simulations for following n_histories: {n_histories}")
-        # for _n_histories in n_histories:
-        #     calculate_variance_deviation(
-        #         n_histories=_n_histories,
-        #         materials=material,
-        #         output_folder=output_folder,
-        #         gpu=gpu,
-        #         n_projections=n_projections,
-        #         number_runs=n_runs_per_setting,
-        #     )
+        for _n_histories in n_histories:
+            calculate_variance_deviation(
+                n_histories=_n_histories,
+                materials=material,
+                output_folder=output_folder,
+                gpu=gpu,
+                n_projections=n_projections,
+                number_runs=n_runs_per_setting,
+            )
 
 
 def calculate_variance_deviation(
