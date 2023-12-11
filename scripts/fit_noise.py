@@ -256,13 +256,14 @@ def plot(folder: Path, reference: str = "water"):
     n_histories, noises = zip(*sorted(zip(n_histories, noises)))
     n_histories = np.array(n_histories)
     noises = np.array(noises)
-    best_n_histories = n_histories[np.argmin(np.abs(noises - reference_noise))]
+    best_idx = np.argmin(np.abs(noises - reference_noise))
+
     print("n_histories\tnoise")
     for _n_histories, noise in zip(n_histories, noises):
         print(f"{_n_histories}\t{noise}")
     print("-" * 80)
-    print(f"reference noise ({reference}):", reference_noise)
-    print(f"best n_histories:", best_n_histories)
+    print(f"reference noise ({reference}): {reference_noise}")
+    print(f"best n_histories: {n_histories[best_idx]} (noise: {noises[best_idx]})")
 
     fig, ax = plt.subplots()
     ax.plot(n_histories, noises)
