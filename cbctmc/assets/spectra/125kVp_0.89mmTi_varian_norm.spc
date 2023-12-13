@@ -1,5 +1,5 @@
 #
-#  125 kVp Tungsten  norm spectrum
+#  125 kVp Tungsten norm spectrum
 #  This is the Varian CBCT spectrum according to ASC calibration folder of real scans
 #  The spectrum is filtered by 0.89 Ti according to Lambert-Beer law
 #

@@ -157,27 +157,27 @@ SEGMENTATION_FILEPATHS_INHOUSE_TEST = [
     for image_filepath in IMAGE_FILEPATHS_INHOUSE_TEST
 ]
 
-IMAGE_FILEPATHS = []
-SEGMENTATION_FILEPATHS = []
+# IMAGE_FILEPATHS = []
+# SEGMENTATION_FILEPATHS = []
+#
+# # IMAGE_FILEPATHS += IMAGE_FILEPATHS_LUNA16
+# # SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_LUNA16
+#
+# IMAGE_FILEPATHS += IMAGE_FILEPATHS_TOTALSEGMENTATOR
+# SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR
+# (
+#     train_image_filepaths,
+#     test_image_filepaths,
+#     train_segmentation_filepaths,
+#     test_segmentation_filepaths,
+# ) = train_test_split(
+#     IMAGE_FILEPATHS, SEGMENTATION_FILEPATHS, train_size=0.90, random_state=1337
+# )
 
-# IMAGE_FILEPATHS += IMAGE_FILEPATHS_LUNA16
-# SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_LUNA16
-
-IMAGE_FILEPATHS += IMAGE_FILEPATHS_TOTALSEGMENTATOR
-SEGMENTATION_FILEPATHS += SEGMENTATION_FILEPATHS_TOTALSEGMENTATOR
-(
-    train_image_filepaths,
-    test_image_filepaths,
-    train_segmentation_filepaths,
-    test_segmentation_filepaths,
-) = train_test_split(
-    IMAGE_FILEPATHS, SEGMENTATION_FILEPATHS, train_size=0.90, random_state=1337
-)
-
-# train_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TRAIN
-# test_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TEST
-# train_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TRAIN
-# test_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TEST
+train_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TRAIN
+test_image_filepaths = IMAGE_FILEPATHS_INHOUSE_TEST
+train_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TRAIN
+test_segmentation_filepaths = SEGMENTATION_FILEPATHS_INHOUSE_TEST
 
 train_dataset = SegmentationDataset(
     image_filepaths=train_image_filepaths,
@@ -270,13 +270,13 @@ model = FlexUNet(
     return_bottleneck=False,
 )
 
-optimizer = Adam(params=model.parameters(), lr=1e-3)
+optimizer = Adam(params=model.parameters(), lr=1e-4)
 
-# state = torch.load(
-#     "/datalake2/runs/mc_material_segmentation_totalsegmentator/2023-09-20T12:07:30.455221_run_cc0235df0c3a41bb9830774c/models/training/step_75000.pth",
-#     map_location=DEVICE,
-# )
-# model.load_state_dict(state["model"])
+state = torch.load(
+    "/datalake2/runs/mc_material_segmentation_inhouse/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071/models/validation/step_95000.pth",
+    map_location=DEVICE,
+)
+model.load_state_dict(state["model"])
 
 # loss_function = nn.BCEWithLogitsLoss(reduction="none")
 # loss_function = DiceLoss(include_background=True, sigmoid=True, reduction="none")
@@ -302,9 +302,9 @@ trainer = CTSegmentationTrainer(
     lr_scheduler=lr_scheduler,
     train_loader=train_data_loader,
     val_loader=test_data_loader,
-    run_folder="/datalake2/runs/mc_material_segmentation_inhouse",
-    experiment_name="mc_material_segmentation_inhouse",
+    run_folder="/datalake2/runs/mc_material_segmentation_inhouse_fine",
+    experiment_name="mc_material_segmentation_inhouse_fine",
     device=DEVICE,
 )
 
-trainer.run(steps=100_000_000, validation_interval=5000, save_interval=1000)
+trainer.run(steps=100_000_000, validation_interval=1000, save_interval=1000)

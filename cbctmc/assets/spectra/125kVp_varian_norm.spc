@@ -1,5 +1,5 @@
 #
-#  125 kVp Tungsten  0.89 mm Ti filtration
+#  125 kVp Tungsten norm spectrum
 #  This is the Varian CBCT spectrum according to ASC calibration folder of real scans
 #
 #

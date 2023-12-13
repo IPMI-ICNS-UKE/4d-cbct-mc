@@ -1,7 +1,7 @@
 import logging
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import click
 from ipmi.common.logger import init_fancy_logging
@@ -16,6 +16,7 @@ import itk
 from cbctmc.defaults import DefaultMCSimulationParameters
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
+from cbctmc.defaults import DefaultVarianScanParameters as VarianDefaults
 from cbctmc.forward_projection import (
     create_geometry,
     prepare_image_for_rtk,
@@ -37,9 +38,34 @@ from cbctmc.mc.simulation import MCSimulation
     default=0,
 )
 @click.option(
-    "--line-spacing-factor",
-    type=int,
+    "--phantom-image-spacing",
+    type=click.Tuple([float, float, float]),
+    default=(0.25, 0.25, 0.25),
+    help="Image spacing of the MC phantom",
+)
+@click.option(
+    "--phantom-shape",
+    type=click.Tuple([int, int, int]),
+    default=(250, 250, 125),
+    help="Image shape of the MC phantom",
+)
+@click.option(
+    "--phantom-radius",
+    type=float,
+    default=30,
+    help="Radius of the MC phantom",
+)
+@click.option(
+    "--phantom-length",
+    type=float,
+    default=30,
+    help="Length of the MC phantom",
+)
+@click.option(
+    "--line-gap",
+    type=float,
     required=True,
+    help="Gap between the two lines of the MC phantom in millimeters",
 )
 @click.option("--reference", is_flag=True)
 @click.option(
@@ -67,7 +93,11 @@ from cbctmc.mc.simulation import MCSimulation
 def run(
     output_folder: Path,
     gpu: int,
-    line_spacing_factor: int,
+    phantom_image_spacing: Tuple[float, float, float],
+    phantom_shape: Tuple[int, int, int],
+    phantom_radius: float,
+    phantom_length: float,
+    line_gap: float,
     reference: bool,
     reference_n_histories: int,
     speedups: List[int],
@@ -111,7 +141,13 @@ def run(
     output_folder.mkdir(parents=True, exist_ok=True)
     simulation_folder = output_folder
 
-    geometry = MCLinePairPhantomGeometry(line_spacing_factor=line_spacing_factor)
+    geometry = MCLinePairPhantomGeometry(
+        line_gap=line_gap,
+        image_spacing=phantom_image_spacing,
+        radius=phantom_radius,
+        length=phantom_length,
+        shape=phantom_shape,
+    )
     geometry.save_material_segmentation(simulation_folder / "geometry_materials.nii.gz")
     geometry.save_density_image(simulation_folder / "geometry_densities.nii.gz")
     geometry.save(simulation_folder / "geometry.pkl.gz")
@@ -127,6 +163,8 @@ def run(
     forward_projection = project_forward(
         image,
         geometry=fp_geometry,
+        detector_size=MCDefaults.n_detector_pixels_half_fan,
+        detector_pixel_spacing=VarianDefaults.detector_pixel_size,
     )
     save_geometry(fp_geometry, simulation_folder / "geometry.xml")
     itk.imwrite(
@@ -141,8 +179,7 @@ def run(
             simulation_folder / config_name,
             run_air_simulation=True,
             clean=True,
-            gpu_id=gpu,
-            **DefaultMCSimulationParameters().geometrical_corrections,
+            gpu_ids=gpu,
             force_rerun=False,
         )
 
@@ -155,7 +192,8 @@ def run(
                 geometry_filepath=simulation_folder / "geometry.xml",
                 output_folder=(simulation_folder / config_name / "reconstructions"),
                 output_filename="fdk3d_wpc.mha",
-                dimension=(464, 250, 464),
+                spacing=(0.25, 0.25, 0.25),
+                dimension=(300, 150, 300),
                 water_pre_correction=ReconDefaults.wpc_catphan604,
                 gpu_id=gpu,
             )

@@ -5,6 +5,7 @@ from pathlib import Path
 from ipmi.common.logger import init_fancy_logging
 
 from cbctmc.defaults import DefaultMCSimulationParameters
+from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 from cbctmc.forward_projection import (
     create_geometry,
     prepare_image_for_rtk,
@@ -13,6 +14,7 @@ from cbctmc.forward_projection import (
 )
 from cbctmc.mc.geometry import MCGeometry
 from cbctmc.mc.simulation import MCSimulation
+from cbctmc.reconstruction.reconstruction import reconstruct_3d
 
 if __name__ == "__main__":
     import itk
@@ -23,74 +25,21 @@ if __name__ == "__main__":
 
     init_fancy_logging()
 
-    N_PROJECTIONS = 32
+    mc_defaults = DefaultMCSimulationParameters()
 
-    CONFIGS = {
-        "high": {
-            "n_histories": int(2.4e9),
-            "n_projections": N_PROJECTIONS,
-            "angle_between_projections": 360.0 / N_PROJECTIONS,
-        },
+    N_PROJECTIONS = 16
+
+    CONFIG = {
+        "n_projections": N_PROJECTIONS,
+        "angle_between_projections": 360.0 / N_PROJECTIONS,
     }
 
-    # device ID: runs
-    RUNS = {
-        0: ("high",),
-    }
+    GPUS = (0, 1)
 
-    GPU = 0
-
-    output_folder = Path("/datalake_fast/mc_test/mc_output/geometry_test")
+    output_folder = Path("/datalake_fast/mc_test/mc_output/geometry_test_new")
 
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    # calibrations = {
-    #     "offset_x": 0.45167524990641345,
-    #     "offset_y": -2.91421985678384,
-    #     "offset_z": -0.2671142029953507,
-    #     "source_to_detector_distance_offset": 2.8987834963872467,
-    #     "source_to_isocenter_distance_offset": 3.391417693032777,
-    # }
-
-    # calibrations = {
-    #     "offset_x": 0.502102109728928,
-    #     "offset_y": -3.742534490604073,
-    #     "offset_z": -0.264611430752569,
-    #     "source_to_detector_distance_offset": 1.6565254185658564,
-    #     "source_to_isocenter_distance_offset": 4.209057564721922,
-    # }
-
-    # calibrations = {
-    #     "offset_x": 0.45619947910024583,
-    #     "offset_y": -3.9406363975565473,
-    #     "offset_z": -0.3525574933952014,
-    #     "source_to_detector_distance_offset": 1.4269519273107474,
-    #     "source_to_isocenter_distance_offset": 4.3951556461792665,
-    # }
-
-    # calibrations = {
-    #     "offset_x": 0.45619947910024583,
-    #     "offset_y": -3.9406363975565473,
-    #     "offset_z": -0.3298962266563392,
-    #     "source_to_detector_distance_offset": 1.4269519273107474,
-    #     "source_to_isocenter_distance_offset": 4.3951556461792665,
-    # }
-
-    # calibrations = {
-    #     "offset_x": -0.5030858965528291,
-    #     "offset_y": -3.749082176733503,
-    #     "offset_z": -0.29206039325204886,
-    #     "source_to_detector_distance_offset": 0.13054052787167872,
-    #     "source_to_isocenter_distance_offset": 3.2595168038949205,
-    # }
-
-    # calibrations = {
-    #     "offset_x": -0.5,
-    #     "offset_y": -0.5,
-    #     "offset_z": -0.5,
-    #     "source_to_detector_distance_offset": 0,
-    #     "source_to_isocenter_distance_offset": 0,
-    # }
     patient_folder = Path(
         "/datalake_fast/4d_ct_lung_uke_artifact_free/022_4DCT_Lunge_amplitudebased_complete"
     )
@@ -116,6 +65,7 @@ if __name__ == "__main__":
     )
 
     run_folder = f"run_{datetime.now().isoformat()}"
+    run_folder = "run_2023-12-11T13:58:42.081127"
     (output_folder / run_folder).mkdir(exist_ok=True)
 
     geometry.save_material_segmentation(
@@ -133,7 +83,14 @@ if __name__ == "__main__":
         output_value_range=None,
     )
 
-    fp_geometry = create_geometry(start_angle=90, n_projections=N_PROJECTIONS)
+    fp_geometry = create_geometry(
+        start_angle=90,
+        n_projections=N_PROJECTIONS,
+        source_to_isocenter=1000.0,
+        source_to_detector=1500.0,
+        detector_offset_x=mc_defaults.detector_lateral_displacement,
+        detector_offset_y=0.0,
+    )
     forward_projection = project_forward(
         image,
         geometry=fp_geometry,
@@ -145,17 +102,24 @@ if __name__ == "__main__":
         str(output_folder / run_folder / "density_fp.mha"),
     )
 
-    for run in RUNS[GPU]:
-        simulation_config = CONFIGS[run]
+    simulation = MCSimulation(geometry=geometry, **CONFIG)
+    simulation.run_simulation(
+        output_folder / run_folder,
+        run_air_simulation=True,
+        clean=True,
+        gpu_ids=GPUS,
+        force_rerun=False,
+    )
 
-        mc_defaults = DefaultMCSimulationParameters()
-
-        simulation = MCSimulation(geometry=geometry, **simulation_config)
-        simulation.run_simulation(
-            output_folder / run_folder,
-            run_air_simulation=True,
-            clean=True,
-            gpu_id=GPU,
-            force_rerun=True,
-            **mc_defaults.geometrical_corrections,
-        )
+    reconstruct_3d(
+        projections_filepath=(
+            output_folder / run_folder / "projections_total_normalized.mha"
+        ),
+        geometry_filepath=output_folder / run_folder / "geometry.xml",
+        output_folder=output_folder / run_folder / "reconstructions",
+        output_filename="fdk3d_wpc.mha",
+        spacing=(1.0, 1.0, 1.0),
+        dimension=(464, 250, 464),
+        water_pre_correction=ReconDefaults.wpc_catphan604,
+        gpu_id=GPUS[0],
+    )

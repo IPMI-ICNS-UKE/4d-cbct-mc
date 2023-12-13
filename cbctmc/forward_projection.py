@@ -73,7 +73,12 @@ def prepare_image_for_rtk(
         for (n_voxels, voxel_size) in zip(image.shape, voxel_size)
     ]
 
+    # add half voxel size to the origin as MC-GPU defines voxels based on
+    # lower voxel edge not voxel center as ITK
+    origin = [o + 0.5 * vs for (o, vs) in zip(origin, voxel_size)]
+
     if origin_offset:
+        # add custom origin offset
         origin = [o + oo for (o, oo) in zip(origin, origin_offset)]
 
     image.SetOrigin(origin)

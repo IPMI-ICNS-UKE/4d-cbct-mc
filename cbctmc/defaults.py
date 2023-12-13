@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Tuple
 
+import numpy as np
+
 from cbctmc.mc.materials import MATERIALS_125KEV
 from cbctmc.mc.spectrum import SPECTRUM_125KVP
 
@@ -51,7 +53,7 @@ class DefaultMCSimulationParameters:
     )
 
     # based on noise fit using A/sqrt(n_historiess) + C and comparison to Varian
-    n_histories: int = 1934000522
+    n_histories: int = 11_903_320_312
     specify_projection_angles: bool = False
     projection_angles = []
     n_projections = DefaultVarianScanParameters.n_projections
@@ -89,15 +91,18 @@ class DefaultMCSimulationParameters:
     source_polar_aperture: Tuple[float, float] = (1.481720423651376, 13.441979314886868)
     source_azimuthal_aperture: Tuple[float, float] = -1
 
+    # 4D specific
+    angular_rotation_velocity: float = 2 * np.pi / 60
+
     # some geometrical corrections to match RTK/MC-GPU geometry
-    geometrical_corrections: dict = field(
-        default_factory=lambda: {
-            "source_position_offset": (
-                -0.5030858965528291,
-                -3.749082176733503,
-                -0.29206039325204886,
-            ),
-            "source_to_detector_distance_offset": 0.13054052787167872,
-            "source_to_isocenter_distance_offset": 3.2595168038949205,
-        }
-    )
+    # geometrical_corrections: dict = field(
+    #     default_factory=lambda: {
+    #         "source_position_offset": (
+    #             -0.5030858965528291,
+    #             -3.749082176733503,
+    #             -0.29206039325204886,
+    #         ),
+    #         "source_to_detector_distance_offset": 0.13054052787167872,
+    #         "source_to_isocenter_distance_offset": 3.2595168038949205,
+    #     }
+    # )

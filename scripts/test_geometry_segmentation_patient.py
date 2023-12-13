@@ -23,7 +23,7 @@ if __name__ == "__main__":
     output_folder.mkdir(parents=True, exist_ok=True)
 
     patient_folder = Path(
-        "/datalake_fast/4d_ct_lung_uke_artifact_free/022_4DCT_Lunge_amplitudebased_complete"
+        "/datalake_fast/4d_ct_lung_uke_artifact_free/024_4DCT_Lunge_amplitudebased_complete"
     )
     geometry = MCGeometry.from_image(
         image_filepath=patient_folder / "phase_00.nii",
@@ -88,7 +88,10 @@ if __name__ == "__main__":
     geometry = MCGeometry.from_image(
         image_filepath=patient_folder / "phase_00.nii",
         segmenter=MCSegmenter(
-            model=model, device="cuda:0", patch_shape=(496, 496, 128), patch_overlap=0.5
+            model=model,
+            device="cuda:0",
+            patch_shape=(128, 128, 128),
+            patch_overlap=0.75,
         ),
         image_spacing=(1.0, 1.0, 1.0),
     )

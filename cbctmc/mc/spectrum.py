@@ -1387,12 +1387,13 @@ SPECTRUM_125KVP_VARIAN_NORM = Spectrum.from_package_resources("125kVp_varian_nor
 SPECTRUM_125KVP_VARIAN_NORM_FILTERED = Spectrum.from_package_resources(
     "125kVp_0.89mmTi_varian_norm.spc"
 )
+# this is pseudo-bowtie spectrum (spectrum filtered by average thickness of bowtie filter)
 SPECTRUM_125KVP_VARIAN_NORM_FILTERED_BOWTIE = Spectrum.from_package_resources(
     "125kVp_0.89mmTi_half_bowtie_varian_norm.spc"
 )
 
 # this is the default spectrum
-SPECTRUM_125KVP = SPECTRUM_125KVP_VARIAN_NORM_FILTERED_BOWTIE
+SPECTRUM_125KVP = SPECTRUM_125KVP_VARIAN_NORM_FILTERED
 
 
 if __name__ == "__main__":

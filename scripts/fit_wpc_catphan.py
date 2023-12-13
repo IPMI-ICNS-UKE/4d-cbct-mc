@@ -10,6 +10,7 @@ import SimpleITK as sitk
 import xraydb
 from ipmi.common.logger import init_fancy_logging
 from scipy.ndimage import binary_erosion
+from tabulate import tabulate
 
 from cbctmc.defaults import DefaultMCSimulationParameters
 from cbctmc.forward_projection import (
@@ -20,13 +21,13 @@ from cbctmc.forward_projection import (
 )
 from cbctmc.mc.geometry import MCCatPhan604Geometry, MCWaterPhantomGeometry
 from cbctmc.mc.materials import MATERIALS_125KEV
-from cbctmc.mc.reference import REFERENCE_MU, REFERENCE_MU_VARIAN
+from cbctmc.mc.reference import REFERENCE_MU, REFERENCE_MU_75KEV, REFERENCE_MU_VARIAN
 from cbctmc.mc.simulation import MCSimulation
+from cbctmc.mc.spectrum import SPECTRUM_125KVP_VARIAN_NORM_FILTERED
 from cbctmc.reconstruction.reconstruction import reconstruct_3d
 
-"""
-The following script perform an end-to-end water precorrection (WPC) [1]
-for the Monte Carlo scan geometry and X-ray parameters.
+"""The following script perform an end-to-end water precorrection (WPC) [1] for
+the Monte Carlo scan geometry and X-ray parameters.
 
 References:
 [1] Sourbelle et al., Empirical water precorrection for cone-beam computed tomography (2005)
@@ -40,13 +41,17 @@ if __name__ == "__main__":
     init_fancy_logging()
 
     N_PROJECTIONS = DefaultMCSimulationParameters.n_projections
-    N_AVERAGE_SLICES: int = 20
+    N_AVERAGE_SLICES: int = 10
     IMAGE_SHAPE = (464, 464, 250)
-    EDGE_EROSION_KERNEL_SIZE: int = 0
+    EDGE_EROSION_KERNEL_SIZE: int = 3
     HIGHEST_ORDER = 5
-    IGNORE_AIR = True
+    # IGNORE_AIR = True
     PLOT_DEBUG: bool = True
     FORCE_RERUN: bool = False
+
+    WPC_REFERENCE_MU = dict(REFERENCE_MU_VARIAN)
+    WPC_REFERENCE_MU["air"] = 0.0013  # 0.0026
+    PHYSICAL_REFERENCE_MU = REFERENCE_MU_75KEV
 
     # cf. Chantler: https://www.nist.gov/pml/x-ray-form-factor-attenuation-and-scattering-tables
     # mean energy of used spectrum is 63.140 keV
@@ -56,31 +61,26 @@ if __name__ == "__main__":
     MU_WATER = xraydb.material_mu("water", MEAN_SPECTRUM_ENERGY) / 10.0
     MU_AIR = xraydb.material_mu("air", MEAN_SPECTRUM_ENERGY) / 10.0
 
-    CONFIGS = {
-        "high": {
-            "n_histories": int(2.4e9),
-            "n_projections": N_PROJECTIONS,
-            "angle_between_projections": 360.0 / N_PROJECTIONS,
-        },
+    CONFIG = {
+        "n_projections": N_PROJECTIONS,
+        "angle_between_projections": 360.0 / N_PROJECTIONS,
     }
 
-    # device ID: runs
-    RUNS = {0: "high"}
+    GPUS = (0, 1)
 
-    GPU = 0
-    run = RUNS[GPU]
-
-    output_folder = Path("/datalake_fast/mc_test/mc_output/fit_wpc_catphan")
+    output_folder = Path(
+        "/mnt/nas_io/anarchy/4d_cbct_mc/fit_wpc_catphan_SPECTRUM_125KVP_VARIAN_NORM_FILTERED"
+    )
+    # output_folder = Path("/mnt/nas_io/anarchy/4d_cbct_mc/fit_wpc_catphan")
 
     output_folder.mkdir(parents=True, exist_ok=True)
-    # run_folder = f"run_{datetime.now().isoformat()}"
+    run_folder = f"run_{datetime.now().isoformat()}"
 
-    run_folder = "run_2023-07-12T19:44:28.433817"
+    run_folder = "run_2023-12-11T18:33:43.870434"
     (output_folder / run_folder).mkdir(exist_ok=True)
 
     # MC simulate Cat Phan 604 if not already simulated
-    phantom = MCCatPhan604Geometry(shape=IMAGE_SHAPE, reference_mu=REFERENCE_MU_VARIAN)
-
+    phantom = MCCatPhan604Geometry(shape=IMAGE_SHAPE, reference_mu=WPC_REFERENCE_MU)
     if not any((output_folder / run_folder).iterdir()):
         phantom.save_material_segmentation(
             output_folder / run_folder / "water_phantom_materials.nii.gz"
@@ -96,28 +96,29 @@ if __name__ == "__main__":
             output_value_range=None,
         )
 
-        # fp_geometry = create_geometry(start_angle=90, n_projections=N_PROJECTIONS)
-        # forward_projection = project_forward(
-        #     image,
-        #     geometry=fp_geometry,
-        # )
-        # save_geometry(fp_geometry, output_folder / run_folder / "geometry.xml")
-        #
-        # itk.imwrite(
-        #     forward_projection,
-        #     str(output_folder / run_folder / "density_fp.mha"),
-        # )
+        fp_geometry = create_geometry(start_angle=90, n_projections=N_PROJECTIONS)
+        forward_projection = project_forward(
+            image,
+            geometry=fp_geometry,
+        )
+        save_geometry(fp_geometry, output_folder / run_folder / "geometry.xml")
 
-        simulation_config = CONFIGS[run]
+        itk.imwrite(
+            forward_projection,
+            str(output_folder / run_folder / "density_fp.mha"),
+        )
 
-        simulation = MCSimulation(geometry=phantom, **simulation_config)
+        simulation = MCSimulation(
+            geometry=phantom,
+            xray_spectrum_filepath=SPECTRUM_125KVP_VARIAN_NORM_FILTERED.filepath,
+            **CONFIG,
+        )
         simulation.run_simulation(
             output_folder / run_folder,
             run_air_simulation=True,
             clean=True,
-            gpu_id=GPU,
-            **DefaultMCSimulationParameters().geometrical_corrections,
-            force_rerun=True,
+            gpu_ids=GPUS,
+            force_rerun=False,
         )
 
     for HIGHEST_ORDER in range(HIGHEST_ORDER, HIGHEST_ORDER + 1):
@@ -167,7 +168,7 @@ if __name__ == "__main__":
         n_air_voxels = air_mask.sum()
         n_water_voxels = water_mask.sum()
 
-        weight_image = np.ones_like(phantom.densities, dtype=np.float32)
+        weight_image = np.zeros_like(phantom.densities, dtype=np.float32)
 
         # if EDGE_EROSION_KERNEL_SIZE:
         #     # binary erosion to exclude edge effects
@@ -184,6 +185,7 @@ if __name__ == "__main__":
             height=N_AVERAGE_SLICES,
         )
         weight_image = fov * weight_image
+
         # same weighting for every material ROI
         materials = (
             "air",
@@ -194,16 +196,21 @@ if __name__ == "__main__":
             "bone_020",
             "acrylic",
             "bone_050",
-            "delrin",
-            "teflon",
+            # "delrin",
+            # "teflon",
         )
         for material in materials:
             mask = phantom.materials == MATERIALS_125KEV[material].number
             mask &= fov
 
-            if IGNORE_AIR and material == "air":
-                # ignore air
-                weight_image[mask] = 0.0
+            # erode mask
+            if EDGE_EROSION_KERNEL_SIZE:
+                mask = binary_erosion(
+                    mask, structure=np.ones((EDGE_EROSION_KERNEL_SIZE,) * 3)
+                ).astype(mask.dtype)
+
+            if material in {"air", "h2o"}:
+                weight_image[mask] = 1.0 / mask.sum() * 20.0
             else:
                 weight_image[mask] = 1.0 / mask.sum()
 
@@ -321,12 +328,16 @@ if __name__ == "__main__":
         "bone_020",
         "acrylic",
         "bone_050",
-        "delrin",
-        "teflon",
+        # "delrin",
+        # "teflon",
     )
 
+    # physical_reference = dict(PHYSICAL_REFERENCE_MU)
+    # physical_reference["air_1"] = physical_reference["air"]
+    # physical_reference["air_2"] = physical_reference["air"]
+
     reference_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
-        reference_recon, height_margin=1, radius_margin=1
+        reference_recon, height_margin=10, radius_margin=3
     )
 
     mean_mu_reference = [
@@ -334,9 +345,10 @@ if __name__ == "__main__":
     ]
 
     mu_fig, mu_ax = plt.subplots()
-    mu_ax.scatter(materials, mean_mu_reference, label="reference")
+    mu_ax.scatter(materials, mean_mu_reference, label="recon reference")
+    # mu_ax.scatter(materials, [physical_reference[material] for material in materials], label="physical reference")
 
-    for recon_name in ("fdk3d", "fdk3d_wpc"):
+    for recon_name in ("fdk3d_wpc",):
         mc_recon = sitk.ReadImage(
             str(output_folder / run_folder / "reconstructions" / f"{recon_name}.mha")
         )
@@ -368,39 +380,115 @@ if __name__ == "__main__":
 
     mu_ax.legend()
 
-    pysical_reference = dict(REFERENCE_MU)
-    pysical_reference["air_1"] = pysical_reference["air"]
-    pysical_reference["air_2"] = pysical_reference["air"]
-    del pysical_reference["air"]
+    # numerial evaluation
+    # pysical_reference = dict(REFERENCE_MU)
+    # pysical_reference["air_1"] = pysical_reference["air"]
+    # pysical_reference["air_2"] = pysical_reference["air"]
+    # del pysical_reference["air"]
 
-    # reference_recon = sitk.ReadImage(
-    #     "/datalake/4d_cbct_mc/CatPhantom/raw_data/2022-12-01_142914/catphan604_varian_registered.mha"
+    reference_recon = sitk.ReadImage(
+        "/datalake/4d_cbct_mc/CatPhantom/raw_data/2022-12-01_142914/catphan604_varian_registered.mha"
+    )
+    reference_recon = sitk.GetArrayFromImage(reference_recon)
+    reference_recon = np.moveaxis(reference_recon, 1, -1)
+    reference_recon = np.rot90(reference_recon, k=-1, axes=(0, 1))
+
+    # wpc_image = sitk.ReadImage(
+    #    str(output_folder / run_folder / "reconstructions" / f"fdk3d_wpc.mha")
     # )
-    # reference_recon = sitk.GetArrayFromImage(reference_recon)
-    # reference_recon = np.moveaxis(reference_recon, 1, -1)
-    # reference_recon = np.rot90(reference_recon, k=-1, axes=(0, 1))
-    #
-    # materials = (
-    #     "air_1",
-    #     "air_2",
-    #     "pmp",
-    #     "ldpe",
-    #     "polystyrene",
-    #     "bone_020",
-    #     "acrylic",
-    #     "bone_050",
-    #     "delrin",
-    #     "teflon",
-    # )
-    #
-    # reference_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
-    #     reference_recon, height_margin=10, radius_margin=3
-    # )
-    #
-    # mc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
-    #     f_n_images[1], height_margin=10, radius_margin=3
-    # )
-    #
-    # mc_wpc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
-    #     wpc_image, height_margin=10, radius_margin=3
-    # )
+    # wpc_image = sitk.GetArrayFromImage(wpc_image)
+    # wpc_image = np.moveaxis(wpc_image, 1, -1)
+    # wpc_image = np.rot90(wpc_image, k=-1, axes=(0, 1))
+
+    materials = (
+        "air_1",
+        "air_2",
+        "pmp",
+        "ldpe",
+        "polystyrene",
+        "bone_020",
+        "acrylic",
+        "bone_050",
+        "delrin",
+        "teflon",
+    )
+
+    reference_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
+        reference_recon, height_margin=10, radius_margin=3
+    )
+
+    mc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
+        f_n_images[1], height_margin=10, radius_margin=3
+    )
+
+    mc_wpc_roi_stats = MCCatPhan604Geometry.calculate_roi_statistics(
+        wpc_image, height_margin=10, radius_margin=3
+    )
+
+    deviations = []
+    evaluation = []
+    for material in materials:
+        # calculate relative difference
+        mc_mu = mc_roi_stats[material]["mean"]
+        mc_wpc_mu = mc_wpc_roi_stats[material]["mean"]
+        ref_mu = reference_roi_stats[material]["mean"]
+
+        rel_diff_before = (mc_mu - ref_mu) / ref_mu
+        rel_diff_after = (mc_wpc_mu - ref_mu) / ref_mu
+        if material not in {"air_1", "air_2", "delrin", "teflon"}:
+            deviations.append(abs(rel_diff_after))
+
+        evaluation.append(
+            {
+                "material": material,
+                "mc_wpc_mu": mc_wpc_mu,
+                "ref_mu": ref_mu,
+                "rel_diff": rel_diff_after,
+            }
+        )
+
+        print(
+            f"{material:<15} {mc_mu=:.4f}, {mc_wpc_mu=:.4f}, {ref_mu=:.4f}, rel. diff.: {rel_diff_before=:6.3f} -> {rel_diff_after=:.3f}"
+        )
+
+    print(f"mean deviation: {np.mean(deviations)=:.3f}")
+
+    # plot line profiles
+    fig, ax = plt.subplots()
+    slicing = np.index_exp[232, :, 90:105]
+    line_profile_reference = reference_recon[slicing].mean(axis=-1)
+    line_profile = f_n_images[1][slicing].mean(axis=-1)
+    line_profile_wpc = wpc_image[slicing].mean(axis=-1)
+
+    ax.plot(line_profile / reference_roi_stats["water"]["mean"], label="no WPC")
+    ax.plot(line_profile_wpc / reference_roi_stats["water"]["mean"], label="WPC")
+    ax.plot(
+        line_profile_reference / reference_roi_stats["water"]["mean"], label="reference"
+    )
+
+    slicing = np.index_exp[140:325]
+    print("Integral non-uniformity")
+
+    line_profile = line_profile[slicing]
+    line_profile_wpc = line_profile_wpc[slicing]
+    line_profile_reference = line_profile_reference[slicing]
+
+    mc_non_uniformity = (line_profile.max() - line_profile.min()) / (
+        line_profile.max() + line_profile.min()
+    )
+    mc_wpc_non_uniformity = (line_profile_wpc.max() - line_profile_wpc.min()) / (
+        line_profile_wpc.max() + line_profile_wpc.min()
+    )
+    reference_non_uniformity = (
+        line_profile_reference.max() - line_profile_reference.min()
+    ) / (line_profile_reference.max() + line_profile_reference.min())
+
+    # mc_non_uniformity = (np.percentile(line_profile, 95) - np.percentile(line_profile, 5)) / (np.percentile(line_profile, 95) + np.percentile(line_profile, 5))
+    # mc_wpc_non_uniformity = (np.percentile(line_profile_wpc, 95) - np.percentile(line_profile_wpc, 5)) / (np.percentile(line_profile_wpc, 95) + np.percentile(line_profile_wpc, 5))
+    # reference_non_uniformity = (np.percentile(line_profile_reference, 95) - np.percentile(line_profile_reference, 5)) / (np.percentile(line_profile_reference, 95) + np.percentile(line_profile_reference, 5))
+
+    print(f"# {mc_non_uniformity=:.6f}")
+    print(f"# {mc_wpc_non_uniformity=:.6f}")
+    print(f"# {reference_non_uniformity=:.6f}")
+
+    print(tabulate(evaluation, headers="keys", tablefmt="plain"))

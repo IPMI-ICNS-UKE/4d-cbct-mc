@@ -26,7 +26,7 @@ from cbctmc.mc.utils import replace_root
 logger = logging.getLogger(__name__)
 
 
-class MCSimulation:
+class BaseMCSimulation:
     _AIR_SIMULATION_FOLDER = "air"
 
     def __init__(
@@ -79,148 +79,6 @@ class MCSimulation:
         output_folder = Path(output_folder)
         # check if projections are already present
         return (output_folder / "projections_total.mha").is_file()
-
-    def run_simulation(
-        self,
-        output_folder: PathLike,
-        run_air_simulation: bool = True,
-        air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
-        clean: bool = True,
-        gpu_ids: Sequence[int] | int = 0,
-        force_rerun: bool = False,
-        force_geometry_recompile: bool = False,
-        source_position_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0),
-        source_to_detector_distance_offset: float = 0.0,
-        source_to_isocenter_distance_offset: float = 0.0,
-    ):
-        output_folder = Path(output_folder)
-        gpu_ids = (gpu_ids,) if isinstance(gpu_ids, int) else gpu_ids
-
-        if self._already_simulated(output_folder) and not force_rerun:
-            logger.info(
-                f"Output folder {output_folder} is not empty, skipping simulation"
-            )
-            return
-
-        logger.debug(f"Running simulation on {len(gpu_ids)} GPUs: {gpu_ids}")
-
-        if not output_folder.is_dir():
-            output_folder.mkdir(parents=True)
-
-        if run_air_simulation:
-            self.run_air_simulation(output_folder, gpu_ids=gpu_ids)
-
-        input_filepath = output_folder / "input.in"
-        geometry_filepath = output_folder / "geometry.vox.gz"
-
-        if not geometry_filepath.exists() or force_geometry_recompile:
-            # TODO: check via hash
-            self.geometry.save_mcgpu_geometry(geometry_filepath)
-
-        image_size = self.geometry.image_size
-
-        source_position = (
-            image_size[0] / 2 + source_position_offset[0],
-            image_size[1] / 2
-            - self.source_to_isocenter_distance
-            + source_position_offset[1],
-            image_size[2] / 2 + source_position_offset[2],
-        )
-
-        # here we prepend "/host" to all paths for running MC-GPU with docker
-        docker_input_filepath = replace_root(input_filepath, new_root="/host")
-        docker_output_folder = replace_root(output_folder, new_root="/host")
-        docker_geometry_filepath = replace_root(geometry_filepath, new_root="/host")
-        docker_xray_spectrum_filepath = replace_root(
-            self.xray_spectrum_filepath, new_root="/host"
-        )
-        docker_material_filepaths = [
-            replace_root(m, new_root="/host") for m in self.material_filepaths
-        ]
-
-        mcgpu_input = MCSimulation.create_mcgpu_input(
-            voxel_geometry_filepath=docker_geometry_filepath,
-            material_filepaths=docker_material_filepaths,
-            xray_spectrum_filepath=docker_xray_spectrum_filepath,
-            source_position=source_position,
-            output_folder=docker_output_folder,
-            n_histories=self.n_histories,
-            n_projections=self.n_projections,
-            angle_between_projections=self.angle_between_projections,
-            source_direction_cosines=self.source_direction_cosines,
-            n_detector_pixels=self.n_detector_pixels,
-            detector_size=self.detector_size,
-            source_to_detector_distance=self.source_to_detector_distance
-            + source_to_detector_distance_offset,
-            source_to_isocenter_distance=self.source_to_isocenter_distance
-            + source_to_isocenter_distance_offset,
-            random_seed=self.random_seed,
-            gpu_ids=gpu_ids,
-        )
-
-        MCSimulation.save_mcgpu_input(mcgpu_input, output_filepath=input_filepath)
-
-        i_projection = 0
-        container = None
-
-        try:
-            logger.info("Starting MC simulation in Docker container")
-
-            container = execute_in_docker(
-                cli_command=[
-                    "mpirun",
-                    "--tag-output",
-                    "-v",
-                    "-n",
-                    str(len(gpu_ids)),
-                    "MC-GPU_v1.3.x",
-                    str(docker_input_filepath),
-                ],
-                gpus=gpu_ids,
-            )
-
-            progress_pattern = re.compile(
-                r"Simulating Projection "
-                r"(?P<i_projection>\d{1,4}) of (?P<n_projections>\d{1,4})"
-            )
-            error_pattern = re.compile(r"(?i)error")
-            progress_bar = tqdm(
-                desc="Simulating MC projections",
-                total=self.n_projections,
-                logger=logger,
-            )
-            with open(output_folder / "run.log", "wt") as f:
-                for log_line in container.logs(stream=True):
-                    log_line = log_line.decode()
-                    f.write(log_line)
-                    log_line = log_line.strip()
-
-                    # check for simulation progress
-                    if match := progress_pattern.search(log_line):
-                        _i_projection = int(match.groupdict()["i_projection"])
-                        progress_bar.update(1)
-
-                    # check for errors
-                    if error_pattern.search(log_line):
-                        logger.error(
-                            f"An error occurred while executing the MC simulation. "
-                            f"Please check the run.log file: {log_line}"
-                        )
-
-        except KeyboardInterrupt:
-            # stopping detached container
-            if container:
-                logger.info("Stopping Docker container")
-                container.stop()
-                logger.info("Docker container stopped")
-
-        # simulation finished or stopped
-        self.postprocess_simulation(
-            output_folder,
-            clean=clean,
-            air_normalization=run_air_simulation,
-            air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
-        )
 
     def postprocess_simulation(
         self,
@@ -349,3 +207,190 @@ class MCSimulation:
             compress=False,
             content_type="MC-GPU input file",
         )
+
+
+class MCSimulation(BaseMCSimulation):
+    def run_simulation(
+        self,
+        output_folder: PathLike,
+        run_air_simulation: bool = True,
+        air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
+        clean: bool = True,
+        gpu_ids: Sequence[int] | int = 0,
+        force_rerun: bool = False,
+        force_geometry_recompile: bool = False,
+        source_position_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+        source_to_detector_distance_offset: float = 0.0,
+        source_to_isocenter_distance_offset: float = 0.0,
+    ):
+        output_folder = Path(output_folder)
+        gpu_ids = (gpu_ids,) if isinstance(gpu_ids, int) else gpu_ids
+
+        if self._already_simulated(output_folder) and not force_rerun:
+            logger.info(
+                f"Output folder {output_folder} is not empty, skipping simulation"
+            )
+            return
+
+        logger.debug(f"Running simulation on {len(gpu_ids)} GPUs: {gpu_ids}")
+
+        if not output_folder.is_dir():
+            output_folder.mkdir(parents=True)
+
+        if run_air_simulation:
+            self.run_air_simulation(output_folder, gpu_ids=gpu_ids)
+
+        input_filepath = output_folder / "input.in"
+        geometry_filepath = output_folder / "geometry.vox.gz"
+
+        if not geometry_filepath.exists() or force_geometry_recompile:
+            # TODO: check via hash
+            self.geometry.save_mcgpu_geometry(geometry_filepath)
+
+        image_size = self.geometry.image_size
+
+        source_position = (
+            image_size[0] / 2 + source_position_offset[0],
+            image_size[1] / 2
+            - self.source_to_isocenter_distance
+            + source_position_offset[1],
+            image_size[2] / 2 + source_position_offset[2],
+        )
+
+        # here we prepend "/host" to all paths for running MC-GPU with docker
+        docker_input_filepath = replace_root(input_filepath, new_root="/host")
+        docker_output_folder = replace_root(output_folder, new_root="/host")
+        docker_geometry_filepath = replace_root(geometry_filepath, new_root="/host")
+        docker_xray_spectrum_filepath = replace_root(
+            self.xray_spectrum_filepath, new_root="/host"
+        )
+        docker_material_filepaths = [
+            replace_root(m, new_root="/host") for m in self.material_filepaths
+        ]
+
+        mcgpu_input = MCSimulation.create_mcgpu_input(
+            voxel_geometry_filepath=docker_geometry_filepath,
+            material_filepaths=docker_material_filepaths,
+            xray_spectrum_filepath=docker_xray_spectrum_filepath,
+            source_position=source_position,
+            output_folder=docker_output_folder,
+            n_histories=self.n_histories,
+            n_projections=self.n_projections,
+            angle_between_projections=self.angle_between_projections,
+            source_direction_cosines=self.source_direction_cosines,
+            n_detector_pixels=self.n_detector_pixels,
+            detector_size=self.detector_size,
+            source_to_detector_distance=self.source_to_detector_distance
+            + source_to_detector_distance_offset,
+            source_to_isocenter_distance=self.source_to_isocenter_distance
+            + source_to_isocenter_distance_offset,
+            random_seed=self.random_seed,
+            gpu_ids=gpu_ids,
+        )
+
+        MCSimulation.save_mcgpu_input(mcgpu_input, output_filepath=input_filepath)
+
+        container = None
+        try:
+            logger.info("Starting MC simulation in Docker container")
+
+            container = execute_in_docker(
+                cli_command=[
+                    "mpirun",
+                    "--tag-output",
+                    "-v",
+                    "-n",
+                    str(len(gpu_ids)),
+                    "MC-GPU_v1.3.x",
+                    str(docker_input_filepath),
+                ],
+                gpus=gpu_ids,
+            )
+
+            progress_pattern = re.compile(
+                r"Simulating Projection "
+                r"(?P<i_projection>\d{1,4}) of (?P<n_projections>\d{1,4})"
+            )
+            error_pattern = re.compile(r"(?i)error")
+            progress_bar = tqdm(
+                desc="Simulating MC projections",
+                total=self.n_projections,
+                logger=logger,
+            )
+            with open(output_folder / "run.log", "wt") as f:
+                for log_line in container.logs(stream=True):
+                    log_line = log_line.decode()
+                    f.write(log_line)
+                    log_line = log_line.strip()
+
+                    # check for simulation progress
+                    if match := progress_pattern.search(log_line):
+                        _i_projection = int(match.groupdict()["i_projection"])
+                        progress_bar.update(1)
+
+                    # check for errors
+                    if error_pattern.search(log_line):
+                        logger.error(
+                            f"An error occurred while executing the MC simulation. "
+                            f"Please check the run.log file: {log_line}"
+                        )
+
+        except KeyboardInterrupt:
+            # stopping detached container
+            if container:
+                logger.info("Stopping Docker container")
+                container.stop()
+                logger.info("Docker container stopped")
+
+        # simulation finished or stopped
+        self.postprocess_simulation(
+            output_folder,
+            clean=clean,
+            air_normalization=run_air_simulation,
+            air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
+        )
+
+
+class MCSimulation4D:
+    def __init__(
+        self,
+        geometry: MCGeometry,
+        material_filepaths: Sequence[PathLike] = MCDefaults.material_filepaths,
+        xray_spectrum_filepath: PathLike = MCDefaults.spectrum_filepath,
+        n_histories: int = MCDefaults.n_histories,
+        n_projections: int = MCDefaults.n_projections,
+        angular_rotation_velocity: float = MCDefaults.angular_rotation_velocity,
+        angle_between_projections: float = MCDefaults.angle_between_projections,
+        source_direction_cosines: Tuple[
+            float, float, float
+        ] = MCDefaults.source_direction_cosines,
+        n_detector_pixels: Tuple[int, int] = MCDefaults.n_detector_pixels,
+        detector_size: Tuple[float, float] = MCDefaults.detector_size,
+        source_to_detector_distance: float = MCDefaults.source_to_detector_distance,
+        source_to_isocenter_distance: float = MCDefaults.source_to_isocenter_distance,
+        random_seed: int = MCDefaults.random_seed,
+    ):
+        self.geometry = geometry
+        self.material_filepaths = material_filepaths
+        self.xray_spectrum_filepath = xray_spectrum_filepath
+        self.n_histories = n_histories
+        self.n_projections = n_projections
+        self.angle_between_projections = angle_between_projections
+        self.source_direction_cosines = source_direction_cosines
+        self.n_detector_pixels = n_detector_pixels
+        self.detector_size = detector_size
+        self.source_to_detector_distance = source_to_detector_distance
+        self.source_to_isocenter_distance = source_to_isocenter_distance
+        self.random_seed = random_seed
+
+    def run_simulation(
+        self,
+        output_folder: PathLike,
+        run_air_simulation: bool = True,
+        air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
+        clean: bool = True,
+        gpu_ids: Sequence[int] | int = 0,
+        force_rerun: bool = False,
+        force_geometry_recompile: bool = False,
+    ):
+        pass

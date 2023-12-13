@@ -74,7 +74,7 @@ if __name__ == "__main__":
     GPU = 0
     run = RUNS[GPU]
 
-    output_folder = Path("/datalake_fast/mc_test/mc_output/fit_wpc")
+    output_folder = Path("/mnt/nas_io/anarchy/4d_cbct_mc/fit_wpc_")
 
     output_folder.mkdir(parents=True, exist_ok=True)
     # run_folder = f"run_{datetime.now().isoformat()}"
@@ -118,8 +118,7 @@ if __name__ == "__main__":
             output_folder / run_folder,
             run_air_simulation=True,
             clean=True,
-            gpu_id=GPU,
-            **DefaultMCSimulationParameters().geometrical_corrections,
+            gpu_ids=GPU,
             force_rerun=True,
         )
 

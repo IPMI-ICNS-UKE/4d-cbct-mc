@@ -7,7 +7,7 @@ from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.forward_projection import prepare_image_for_rtk
 from cbctmc.mc.geometry import MCGeometry
 from cbctmc.mc.simulation import MCSimulation
-from cbctmc.segmentation import (
+from cbctmc.segmentation.utils import (
     merge_upper_body_bone_segmentations,
     merge_upper_body_fat_segmentations,
     merge_upper_body_muscle_segmentations,

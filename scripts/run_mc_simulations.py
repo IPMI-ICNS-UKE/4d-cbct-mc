@@ -17,6 +17,7 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
 import itk
 
+from cbctmc.defaults import DefaultMCSimulationParameters
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 from cbctmc.forward_projection import (
@@ -68,8 +69,13 @@ from cbctmc.speedup.models import FlexUNet
 )
 @click.option("--reference", is_flag=True)
 @click.option(
-    "--speedups",
+    "--reference-n-histories",
     type=int,
+    default=MCDefaults.n_histories,
+)
+@click.option(
+    "--speedups",
+    type=float,
     multiple=True,
     default=[],
 )
@@ -112,6 +118,7 @@ def run(
     i_worker: int,
     n_workers: int,
     reference: bool,
+    reference_n_histories: int,
     phases: List[int],
     speedups: List[int],
     segmenter_weights: Path,
@@ -131,13 +138,13 @@ def run(
     CONFIGS = {}
     if reference:
         CONFIGS["reference"] = {
-            "n_histories": int(MCDefaults.n_histories),
+            "n_histories": reference_n_histories,
             "n_projections": n_projections,
             "angle_between_projections": 360.0 / n_projections,
         }
     CONFIGS.update(
         {
-            f"speedup_{s:02d}x": {
+            f"speedup_{s:.2f}x": {
                 "n_histories": int(MCDefaults.n_histories / s),
                 "n_projections": n_projections,
                 "angle_between_projections": 360.0 / n_projections,
@@ -271,7 +278,9 @@ def run(
                     output_value_range=None,
                 )
                 logger.info("Perform forward projection")
-                fp_geometry = create_geometry(n_projections=n_projections)
+                fp_geometry = create_geometry(
+                    start_angle=90, n_projections=n_projections
+                )
                 forward_projection = project_forward(
                     image,
                     geometry=fp_geometry,
@@ -295,7 +304,7 @@ def run(
                     simulation_folder / config_name,
                     run_air_simulation=True,
                     clean=True,
-                    gpu_id=gpu,
+                    gpu_ids=gpu,
                     force_rerun=False,
                 )
 
