@@ -1,8 +1,7 @@
 import logging
 import os
-import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import click
 import torch
@@ -17,7 +16,6 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
 import itk
 
-from cbctmc.defaults import DefaultMCSimulationParameters
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 from cbctmc.forward_projection import (
@@ -54,18 +52,11 @@ from cbctmc.speedup.models import FlexUNet
 )
 @click.option(
     "--gpu",
+    help="GPU PCI bus ID to use for simulation",
     type=int,
-    default=0,
-)
-@click.option(
-    "--i-worker",
-    type=int,
-    default=1,
-)
-@click.option(
-    "--n-workers",
-    type=int,
-    default=1,
+    default=(0,),
+    multiple=True,
+    show_default=True,
 )
 @click.option("--reference", is_flag=True)
 @click.option(
@@ -114,9 +105,7 @@ def run(
     data_folder: Path,
     regex: str,
     output_folder: Path,
-    gpu: int,
-    i_worker: int,
-    n_workers: int,
+    gpu: Sequence[int],
     reference: bool,
     reference_n_histories: int,
     phases: List[int],
@@ -184,7 +173,7 @@ def run(
 
         segmenter = MCSegmenter(
             model=model,
-            device=f"cuda:{gpu}",
+            device=f"cuda:{gpu[0]}",
             patch_shape=segmenter_patch_shape,
             patch_overlap=segmenter_patch_overlap,
         )
@@ -197,12 +186,6 @@ def run(
     logger.info(
         f"Found {len(patients)} patients using "
         f"data folder {data_folder} and regex pattern {regex}"
-    )
-    patients = patients[i_worker - 1 :: n_workers]
-
-    logger.info(
-        f"Running simulations for {len(patients)} patients "
-        f"(worker {i_worker}/{n_workers})"
     )
 
     for patient_folder in patients:
@@ -290,7 +273,6 @@ def run(
                     forward_projection,
                     str(simulation_folder / "density_fp.mha"),
                 )
-
             else:
                 geometry = MCGeometry.load(simulation_folder / "geometry.pkl.gz")
 
@@ -323,7 +305,7 @@ def run(
                         output_filename="fdk3d_wpc.mha",
                         dimension=(464, 250, 464),
                         water_pre_correction=ReconDefaults.wpc_catphan604,
-                        gpu_id=gpu,
+                        gpu_id=gpu[0],
                     )
 
 
