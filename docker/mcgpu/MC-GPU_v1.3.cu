@@ -1037,13 +1037,7 @@ int main(int argc, char **argv)
 
 
     // *** Report the final results:
-    char file_name_output_num_p[253];
-    if (1==num_projections)
-      strcpy(file_name_output_num_p, file_name_output);   // Use the input name for single projection
-    else
-      sprintf(file_name_output_num_p, "%s_%04d", file_name_output, num_p);   // Create the output file name with the input name + projection number (4 digits, padding with 0)
-
-    MASTER_THREAD report_image(file_name_output_num_p, detector_data, source_data, mean_energy_spectrum, image, time_elapsed_MC_loop, total_histories, num_p, num_projections, D_angle, initial_angle, myID, numprocs, &enable_specific_angles, specific_angles);
+    MASTER_THREAD report_image(file_name_output, detector_data, source_data, mean_energy_spectrum, image, time_elapsed_MC_loop, total_histories, num_p, num_projections, D_angle, initial_angle, myID, numprocs, &enable_specific_angles, specific_angles);
 
     // *** Clear the image after reporting, unless this is the last projection to simulate:
     if (num_p<(num_projections-1))
@@ -2791,13 +2785,20 @@ int report_image(char* file_name_output, struct detector_struct* detector_data, 
 
   //  -Find current angle
   float current_angle = 0.0;
+  float sequential_current_angle = 0.0;
   if (*enable_specific_angles==0)
   {
       current_angle = (initial_angle+current_projection*D_angle)*RAD2DEG;
+      sequential_current_angle = current_angle;
       if (current_angle>=(360-0.0001))
         current_angle -= 360;
   } else
       current_angle = specific_angles[current_projection];
+      sequential_current_angle = current_angle;
+
+  char file_name_output_with_angle[253];
+  sprintf(file_name_output_with_angle, "%s_%010.6fdeg", file_name_output, sequential_current_angle);   // Create the output file name with the input name + projection angle
+
   // -- Report data:
   printf("\n\n          *** IMAGE TALLY PERFORMANCE REPORT ***\n");
 
@@ -2815,11 +2816,11 @@ int report_image(char* file_name_output, struct detector_struct* detector_data, 
   else
     printf("              Specific angles enabled: YES\n");
 
-  FILE* file_ptr = fopen(file_name_output, "w");
+  FILE* file_ptr = fopen(file_name_output_with_angle, "w");
 
   if (file_ptr==NULL)
   {
-    printf("\n\n   !!fopen ERROR report_image!! File %s can not be opened!!\n", file_name_output);
+    printf("\n\n   !!fopen ERROR report_image!! File %s can not be opened!!\n", file_name_output_with_angle);
     exit(-3);
   }
 
