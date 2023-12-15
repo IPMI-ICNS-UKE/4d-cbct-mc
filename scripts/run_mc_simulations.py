@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 from pathlib import Path
@@ -8,7 +10,9 @@ import torch
 from ipmi.common.logger import init_fancy_logging
 from torch import nn
 
+from cbctmc.mc.respiratory import RespiratorySignal
 from cbctmc.reconstruction.reconstruction import reconstruct_3d
+from cbctmc.registration.correspondence import CorrespondenceModel
 from cbctmc.utils import get_folders_by_regex
 
 # order GPU ID by PCI bus ID
@@ -25,7 +29,7 @@ from cbctmc.forward_projection import (
     save_geometry,
 )
 from cbctmc.mc.geometry import MCGeometry
-from cbctmc.mc.simulation import MCSimulation
+from cbctmc.mc.simulation import MCSimulation, MCSimulation4D
 from cbctmc.segmentation.labels import LABELS
 from cbctmc.segmentation.segmenter import MCSegmenter
 from cbctmc.segmentation.utils import (
@@ -61,7 +65,7 @@ from cbctmc.speedup.models import FlexUNet
 @click.option("--reference", is_flag=True)
 @click.option(
     "--reference-n-histories",
-    type=int,
+    type=click.INT,
     default=MCDefaults.n_histories,
 )
 @click.option(
@@ -96,6 +100,17 @@ from cbctmc.speedup.models import FlexUNet
     default=MCDefaults.n_projections,
 )
 @click.option("--reconstruct", is_flag=True)
+@click.option("--forward-projection", is_flag=True)
+@click.option(
+    "--correspondence-model",
+    type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
+    default=None,
+)
+@click.option(
+    "--respiratory-signal",
+    type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
+    default=None,
+)
 @click.option(
     "--loglevel",
     type=click.Choice(["debug", "info", "warning", "error", "critical"]),
@@ -115,6 +130,9 @@ def run(
     segmenter_patch_overlap: float,
     n_projections: int,
     reconstruct: bool,
+    forward_projection: bool,
+    correspondence_model: Path | None,
+    respiratory_signal: Path | None,
     loglevel: str,
 ):
     # set up logging
@@ -147,6 +165,25 @@ def run(
             "Please use --reference and/or --speedups to specify runs"
         )
         return
+
+    is_4d = correspondence_model is not None and respiratory_signal is not None
+    if is_4d:
+        mc_simulation_class = MCSimulation4D
+        logger.info(f"This is a 4D simulation, thus using {mc_simulation_class}")
+        logger.info(f"Load correspondence model: {correspondence_model}")
+        correspondence_model = CorrespondenceModel.load(correspondence_model)
+        logger.info(f"Load respiratory signal: {respiratory_signal}")
+        respiratory_signal = RespiratorySignal.load(respiratory_signal)
+
+        # add correspondence model to each config entry
+        for config in CONFIGS.values():
+            config["correspondence_model"] = correspondence_model
+    else:
+        # 3D MC simulation, i.e. no correspondence model and no respiratory signal
+        mc_simulation_class = MCSimulation
+        logger.info(f"This is a 3D simulation, thus using {mc_simulation_class}")
+        correspondence_model = None
+        respiratory_signal = None
 
     logger.info(f"Simulation configs: {CONFIGS}")
     if segmenter_weights:
@@ -254,25 +291,26 @@ def run(
                 )
                 geometry.save(simulation_folder / "geometry.pkl.gz")
 
-                image = prepare_image_for_rtk(
-                    image=geometry.densities,
-                    image_spacing=geometry.image_spacing,
-                    input_value_range=None,
-                    output_value_range=None,
-                )
-                logger.info("Perform forward projection")
                 fp_geometry = create_geometry(
                     start_angle=90, n_projections=n_projections
                 )
-                forward_projection = project_forward(
-                    image,
-                    geometry=fp_geometry,
-                )
                 save_geometry(fp_geometry, simulation_folder / "geometry.xml")
-                itk.imwrite(
-                    forward_projection,
-                    str(simulation_folder / "density_fp.mha"),
-                )
+                if forward_projection:
+                    logger.info("Perform forward projection")
+                    image = prepare_image_for_rtk(
+                        image=geometry.densities,
+                        image_spacing=geometry.image_spacing,
+                        input_value_range=None,
+                        output_value_range=None,
+                    )
+                    density_forward_projection = project_forward(
+                        image,
+                        geometry=fp_geometry,
+                    )
+                    itk.imwrite(
+                        density_forward_projection,
+                        str(simulation_folder / "density_fp.mha"),
+                    )
             else:
                 geometry = MCGeometry.load(simulation_folder / "geometry.pkl.gz")
 
@@ -281,13 +319,19 @@ def run(
                     f"Run simulation with config {config_name} "
                     f"for patient {patient_folder.name} and phase {phase}"
                 )
-                simulation = MCSimulation(geometry=geometry, **config)
+
+                additional_run_kwargs = {}
+                if is_4d:
+                    additional_run_kwargs["respiratory_signal"] = respiratory_signal
+
+                simulation = mc_simulation_class(geometry=geometry, **config)
                 simulation.run_simulation(
-                    simulation_folder / config_name,
+                    output_folder=simulation_folder / config_name,
                     run_air_simulation=True,
                     clean=True,
                     gpu_ids=gpu,
                     force_rerun=False,
+                    **additional_run_kwargs,
                 )
 
                 if reconstruct:

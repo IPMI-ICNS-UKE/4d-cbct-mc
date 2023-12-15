@@ -171,7 +171,7 @@ def projections_to_itk(
 
 def get_projections_from_folder(
     folder: PathLike,
-    regex_pattern: str = r"^projection_\d{3}\.\d{6})?$",
+    regex_pattern: str = r"^projection_\d{3}\.\d{6}deg$",
     n_detector_pixels: Tuple[int, int] = MCDefaults.n_detector_pixels,
     n_detector_pixels_half_fan: Tuple[int, int] = MCDefaults.n_detector_pixels_half_fan,
     detector_size: Tuple[float, float] = MCDefaults.detector_size,

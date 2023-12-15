@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import pickle
 from typing import Sequence
 
 import matplotlib.pyplot as plt
@@ -12,6 +13,8 @@ from vroc.models import Unet3d
 from vroc.registration import VrocRegistration
 from vroc.segmentation.segmentation import Segmenter3d
 
+from cbctmc.common_types import PathLike
+from cbctmc.mc.respiratory import RespiratorySignal
 from cbctmc.segmentation.labels import LABELS, get_label_index
 from cbctmc.segmentation.segmenter import MCSegmenter
 from cbctmc.speedup.models import FlexUNet
@@ -19,18 +22,45 @@ from cbctmc.speedup.models import FlexUNet
 
 class CorrespondenceModel:
     def __init__(self):
-        self._coefficients: np.ndarray | None = None
-        self._timesteps: int | None = None
-        self._mean_signal: np.ndarray | None = None
-        self._signal_n_dims: int | None = None
-        self._mean_vector_field: np.ndarray | None = None
-        self._spatial_shape = None
+        self.coefficients: np.ndarray | None = None
+        self.timesteps: int | None = None
+        self.mean_signal: np.ndarray | None = None
+        self.signal_n_dims: int | None = None
+        self.mean_vector_field: np.ndarray | None = None
+        self.spatial_shape = None
+        self.signals: np.ndarray | None = None
+
+    def save(self, filepath: PathLike):
+        with open(filepath, "wb") as f:
+            pickle.dump(
+                {
+                    "coefficients": self.coefficients,
+                    "timesteps": self.timesteps,
+                    "signals": self.signals,
+                    "mean_signal": self.mean_signal,
+                    "signal_n_dims": self.signal_n_dims,
+                    "mean_vector_field": self.mean_vector_field,
+                    "spatial_shape": self.spatial_shape,
+                },
+                f,
+            )
+
+    @classmethod
+    def load(cls, filepath: PathLike) -> CorrespondenceModel:
+        with open(filepath, "rb") as f:
+            data = pickle.load(f)
+
+        correspondence_model = cls()
+        for key, value in data.items():
+            setattr(correspondence_model, key, value)
+
+        return correspondence_model
 
     @property
     def is_fitted(self) -> bool:
         return all(
             v is not None
-            for v in (self._coefficients, self._mean_signal, self._mean_vector_field)
+            for v in (self.coefficients, self.mean_signal, self.mean_vector_field)
         )
 
     def _regularize_matrix(
@@ -102,25 +132,25 @@ class CorrespondenceModel:
         # coefficients: (3*x*y*z, signal_n_dims)
 
         # input vector_fields is of shape (timesteps, 3, x, y, z)
-        self._spatial_shape = vector_fields.shape[2:]
-        self._timesteps = vector_fields.shape[0]
+        self.spatial_shape = vector_fields.shape[2:]
+        self.timesteps = vector_fields.shape[0]
         # reshape vector_fields to matrix of shape (3*x*y*z, t)
-        vector_fields = vector_fields.reshape(self._timesteps, -1).T
+        vector_fields = vector_fields.reshape(self.timesteps, -1).T
         # calculate mean along timesteps
-        self._mean_vector_field = np.mean(vector_fields, axis=1, keepdims=True)
+        self.mean_vector_field = np.mean(vector_fields, axis=1, keepdims=True)
 
-        signals = signals.reshape(self._timesteps, -1).T
-        self._signal_n_dims = signals.shape[0]
+        signals = signals.reshape(self.timesteps, -1).T
+        self.signal_n_dims = signals.shape[0]
         # calculate mean along timesteps
-        self._mean_signal = np.mean(signals, axis=1, keepdims=True)
+        self.mean_signal = np.mean(signals, axis=1, keepdims=True)
 
-        centered_vector_fields = vector_fields - self._mean_vector_field
-        centered_signals = signals - self._mean_signal
+        centered_vector_fields = vector_fields - self.mean_vector_field
+        centered_signals = signals - self.mean_signal
 
         # calculating Moore-Penrose pseudo-inverse of signals matrix
         # Here: avoid non-invertibility by using Tikhonov regularization if needed
 
-        if self._timesteps >= self._signal_n_dims:
+        if self.timesteps >= self.signal_n_dims:
             # time steps >= signal dimensions, i.e., n_rows >= n_columns
             #
             logger.info("time steps >= signal dimensions")
@@ -137,15 +167,16 @@ class CorrespondenceModel:
                 np.linalg.inv(covariance_matrix) @ centered_signals.T
             )
 
-        self._coefficients = centered_vector_fields @ centered_signals_pinv
+        self.coefficients = centered_vector_fields @ centered_signals_pinv
+        self.signals = signals
 
     def predict(self, signal: np.ndarray) -> np.ndarray:
         if not self.is_fitted:
             raise RuntimeError("Correspondence model is not fitted")
-        if signal.shape != (self._signal_n_dims,):
+        if signal.shape != (self.signal_n_dims,):
             raise ValueError(
                 f"Given signal has wrong shape. "
-                f"Expected ({self._signal_n_dims},), but got {signal.shape}"
+                f"Expected ({self.signal_n_dims},), but got {signal.shape}"
             )
 
         # input signal is of shape (signal_n_dims,)
@@ -153,10 +184,10 @@ class CorrespondenceModel:
         signal = signal[:, None]
 
         # prediction is of shape (3*x*y*z, 1)
-        prediction = self._mean_vector_field + self._coefficients @ signal
+        prediction = self.mean_vector_field + self.coefficients @ signal
 
         # reshape to (3, x, y, z)
-        prediction = prediction.reshape(3, *self._spatial_shape)
+        prediction = prediction.reshape(3, *self.spatial_shape)
 
         return prediction
 
@@ -215,20 +246,33 @@ class CorrespondenceModel:
         images: np.ndarray,
         signals: np.ndarray | None = None,
         masks: np.ndarray | None = None,
+        timepoints: np.ndarray | None = None,
         device: str = "cuda",
     ):
         """Build a default correspondence model using the images, masks and
         signal."""
         if signals is None:
             if masks is not None:
+                if timepoints is None:
+                    raise ValueError("timepoints must be given if masks are given")
                 logger.info("Using lung volumes as signals")
-                lung_volumes = masks.reshape(masks.shape[0], -1).sum(axis=1)
-                signals = lung_volumes - lung_volumes.mean()
-                # clip to [-1, 1]
-                signals = signals / np.abs(signals).max()
-                dt_signals = np.gradient(signals, axis=0)
+                respiratory_signal = RespiratorySignal.from_masks(
+                    masks=masks,
+                    timepoints=timepoints,
+                )
+                # just select the signal at the specified timepoints by interpolation
+                signal = np.interp(
+                    timepoints,
+                    respiratory_signal.time,
+                    respiratory_signal.signal,
+                )
+                dt_signal = np.interp(
+                    timepoints,
+                    respiratory_signal.time,
+                    respiratory_signal.dt_signal,
+                )
+                signals = np.stack([signal, dt_signal], axis=0)
 
-                signals = np.stack([signals, dt_signals], axis=1)
             else:
                 raise ValueError("Either signals or masks must be given")
 
@@ -312,14 +356,32 @@ if __name__ == "__main__":
     masks = [read_image(mask_filepath) for mask_filepath in mask_filepaths]
     masks = np.stack(masks, axis=0)
 
-    model = CorrespondenceModel.build_default(images=images, masks=masks)
+    # timepoints = np.linspace(0, 5, 10)
+    # signal = RespiratorySignal.from_masks(
+    #     masks=masks,
+    #     timepoints=timepoints,
+    #     target_total_seconds=5.0,
+    #     target_sampling_frequency=25.0
+    # )
+    #
+    # signal_timepoints = np.interp(
+    #     timepoints, signal.time, signal.signal,
+    # )
+    #
+    #
+    # plt.plot(signal.time, signal.signal)
+    # plt.plot(signal.time, signal.dt_signal)
+    # plt.scatter(timepoints, signal_timepoints)
+    timepoints = np.linspace(0.0, 5.0, 10)
+    respiratory_signal = RespiratorySignal.from_masks(
+        masks=masks,
+        timepoints=timepoints,
+        target_sampling_frequency=25.0,
+        target_total_seconds=60.0,
+    )
+    respiratory_signal.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl")
 
-    # pred = model.predict(np.array([0.7918972439236112, -0.028313530815972224]))
-    #
-    # import matplotlib.pyplot as plt
-    #
-    # mean_vector_field = model._mean_vector_field.reshape(3, *model._spatial_shape)
-    #
-    # fig, ax = plt.subplots(1, 2)
-    # ax[0].imshow(mean_vector_field[2, :, 256, :], clim=(-10, 10))
-    # ax[1].imshow(pred[2, :, 256, :], clim=(-10, 10))
+    model = CorrespondenceModel.build_default(
+        images=images, masks=masks, timepoints=timepoints
+    )
+    model.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl")

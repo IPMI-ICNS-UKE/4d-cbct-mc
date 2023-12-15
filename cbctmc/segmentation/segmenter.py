@@ -38,6 +38,10 @@ class MCSegmenter:
         self.input_value_range = input_value_range
         self.output_value_range = output_value_range
 
+    @staticmethod
+    def clear_cache():
+        torch.cuda.empty_cache()
+
     def segment(self, image: np.ndarray) -> np.ndarray:
         image = np.asarray(image, dtype=np.float32)
         if image.ndim != 3:

@@ -33,6 +33,11 @@ class DefaultVarianScanParameters:
     # source_to_isocenter_distance is given in mm
     source_to_isocenter_distance: float = 1000.0
 
+    # nominal gantry rotation speed is given in deg/s
+    gantry_rotation_speed: float = 6.0
+    # image acquisition frame rate is given in frames/s
+    frame_rate: float = 15.0
+
 
 @dataclass
 class DefaultMCSimulationParameters:
@@ -83,7 +88,8 @@ class DefaultMCSimulationParameters:
     source_azimuthal_aperture: Tuple[float, float] = -1
 
     # 4D specific
-    angular_rotation_velocity: float = 2 * np.pi / 60
+    gantry_rotation_speed: float = DefaultVarianScanParameters.gantry_rotation_speed
+    frame_rate: float = DefaultVarianScanParameters.frame_rate
 
     # some geometrical corrections to match RTK/MC-GPU geometry
     # geometrical_corrections: dict = field(
