@@ -12,6 +12,7 @@ import scipy.optimize as opt
 import SimpleITK as sitk
 from ipmi.common.logger import init_fancy_logging
 from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score
 
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
@@ -296,6 +297,7 @@ def plot(folder: Path, reference: str = "water"):
     # sort by n_histories
     n_histories, noises = zip(*sorted(zip(n_histories, noises)))
     n_histories = np.array(n_histories)
+
     noises = np.array(noises)
     best_idx = np.argmin(np.abs(noises - reference_noise))
 
@@ -303,26 +305,33 @@ def plot(folder: Path, reference: str = "water"):
         return a / np.sqrt(x)
 
     (a,), _ = curve_fit(sqrt_func, xdata=n_histories, ydata=noises)
-    print(f"# n_histories optimization report for {folder}")
-    print(f"# optimal sqrt fit: {a} / sqrt(n_histories)")
-    print(f"# reference noise ({reference}): {reference_noise}")
-    print(
-        f"# best n_histories optimization: {n_histories[best_idx]} (noise: {noises[best_idx]})"
-    )
 
     n_histories_fit = np.linspace(n_histories[0], n_histories[-1], 1000)
     noises_fit = sqrt_func(n_histories_fit, a)
 
-    best_n_histories_fit = a**2 / reference_noise**2
-    print(f"# best n_histories fit: {int(best_n_histories_fit):.2e}")
+    r2 = r2_score(noises, sqrt_func(n_histories, a))
 
+    best_n_histories_fit = a**2 / reference_noise**2
+
+    print(f"# n_histories optimization report for {folder}")
+    print(f"# optimal sqrt fit: {a} / sqrt(n_histories)")
+    print(f"# R² of sqrt fit: {r2}")
+    print(f"# reference noise ({reference}): {reference_noise}")
+    print(
+        f"# best n_histories optimization: {n_histories[best_idx]} (noise: {noises[best_idx]})"
+    )
+    print(f"# best n_histories fit: {int(best_n_histories_fit):.2e}")
     print("n_histories\tnoise")
     for _n_histories, noise in zip(n_histories, noises):
         print(f"{_n_histories}\t{noise}")
 
     fig, ax = plt.subplots()
     ax.plot(n_histories, noises, label="simulation")
-    ax.plot(n_histories_fit, noises_fit, label=f"{a:.6f}/sqrt(n_histories) fit")
+    ax.plot(
+        n_histories_fit,
+        noises_fit,
+        label=f"{a:.6f}/sqrt(n_histories) fit (R²={r2:.4f})",
+    )
     ax.axhline(
         y=reference_noise, color="r", linestyle="-", label="Varian reference noise"
     )
