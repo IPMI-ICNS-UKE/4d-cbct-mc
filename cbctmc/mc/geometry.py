@@ -14,9 +14,11 @@ import numpy as np
 import pkg_resources
 import scipy.ndimage as ndi
 import SimpleITK as sitk
+import torch
 import torch.nn as nn
 from jinja2 import Environment, FileSystemLoader
 from scipy.ndimage import filters
+from vroc.blocks import SpatialTransformer
 
 from cbctmc.common_types import FloatTuple3D, PathLike
 from cbctmc.mc.dataio import save_text_file
@@ -335,6 +337,59 @@ class MCGeometry:
         self.image_direction = image_direction
         self.image_origin = image_origin
 
+    def warp(self, vector_field: np.ndarray, device: str = "cpu") -> MCGeometry:
+        # check vector_field shape: (batch, n_spatial_dims, x_size, y_size, z_size)
+        if vector_field.ndim != 5:
+            vector_field = vector_field[None, ...]
+
+        if vector_field.shape[1] != 3:
+            raise ValueError(
+                "Expected vector_field to have 3 spatial dimensions, "
+                f"but got {vector_field.shape=}"
+            )
+
+        vector_field = torch.as_tensor(vector_field, dtype=torch.float32)
+        materials = torch.as_tensor(self.materials[None, None, ...], dtype=torch.uint8)
+        densities = torch.as_tensor(
+            self.densities[None, None, ...], dtype=torch.float32
+        )
+
+        spatial_transformer = SpatialTransformer().to(device)
+        warped_materials = spatial_transformer(
+            materials,
+            transformation=vector_field,
+            mode="nearest",
+            default_value=0,
+        )
+        warped_materials = warped_materials[0, 0].cpu().numpy()
+        warped_densities = spatial_transformer(
+            densities,
+            transformation=vector_field,
+            interpolation="nearest",
+            mode=0,
+        )
+        warped_densities = warped_densities[0, 0].cpu().numpy()
+
+        if self.mus is not None:
+            mus = torch.as_tensor(self.mus[None, None, ...], dtype=torch.float32)
+            warped_mus = spatial_transformer(
+                mus,
+                transformation=vector_field,
+                interpolation="nearest",
+                default_value=0,
+            )
+            warped_mus = warped_mus[0, 0].cpu().numpy()
+        else:
+            warped_mus = None
+        return MCGeometry(
+            materials=warped_materials,
+            densities=warped_densities,
+            mus=warped_mus,
+            image_spacing=self.image_spacing,
+            image_direction=self.image_direction,
+            image_origin=self.image_origin,
+        )
+
     @property
     def image_shape(self) -> Tuple[int, int, int]:
         return self.materials.shape
@@ -423,6 +478,7 @@ class MCGeometry:
         if segmenter:
             # if a segmenter is given: predict segmentations
             segmentation, _ = segmenter.segment(image)
+            segmenter.clear_cache()
 
             body_segmentation = segmentation[get_label_index("background")] == 0
             bone_segmentation = segmentation[get_label_index("upper_body_bones")]
