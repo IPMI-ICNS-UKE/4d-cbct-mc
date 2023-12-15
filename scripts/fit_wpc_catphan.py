@@ -429,9 +429,10 @@ if __name__ == "__main__":
     evaluation = []
     for material in materials:
         # calculate relative difference
-        mc_mu = mc_roi_stats[material]["mean"]
-        mc_wpc_mu = mc_wpc_roi_stats[material]["mean"]
-        ref_mu = reference_roi_stats[material]["mean"]
+
+        mc_mu = mc_roi_stats[material]["p50"]
+        mc_wpc_mu = mc_wpc_roi_stats[material]["p50"]
+        ref_mu = reference_roi_stats[material]["p50"]
 
         rel_diff_before = (mc_mu - ref_mu) / ref_mu
         rel_diff_after = (mc_wpc_mu - ref_mu) / ref_mu
@@ -441,8 +442,12 @@ if __name__ == "__main__":
         evaluation.append(
             {
                 "material": material,
-                "mc_wpc_mu": mc_wpc_mu,
-                "ref_mu": ref_mu,
+                "mc_wpc_mu_p50": mc_wpc_roi_stats[material]["p50"],
+                "ref_mu_p50": reference_roi_stats[material]["p50"],
+                "mc_wpc_mu_p25": mc_wpc_roi_stats[material]["p25"],
+                "ref_mu_p25": reference_roi_stats[material]["p25"],
+                "mc_wpc_mu_p75": mc_wpc_roi_stats[material]["p75"],
+                "ref_mu_p75": reference_roi_stats[material]["p75"],
                 "rel_diff": rel_diff_after,
             }
         )
