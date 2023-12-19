@@ -18,6 +18,7 @@ from cbctmc.mc.respiratory import RespiratorySignal
 from cbctmc.segmentation.labels import LABELS, get_label_index
 from cbctmc.segmentation.segmenter import MCSegmenter
 from cbctmc.speedup.models import FlexUNet
+from cbctmc.utils import resample_image_spacing
 
 
 class CorrespondenceModel:
@@ -346,6 +347,9 @@ if __name__ == "__main__":
 
     def read_image(filepath) -> np.ndarray:
         image = sitk.ReadImage(str(filepath))
+        image = resample_image_spacing(
+            image, new_spacing=(1.0, 1.0, 1.0), resampler=sitk.sitkNearestNeighbor
+        )
         image = sitk.GetArrayFromImage(image)
         image = np.swapaxes(image, 0, 2)
         return image
