@@ -1577,7 +1577,7 @@ void read_input(int argc, char** argv, int myID, unsigned long long int* total_h
       *initial_angle = (*initial_angle) + 2.0*PI;   // Make sure the initial angle is not negative, between [0,360) degrees.
     if (*enable_specific_angles == 1)
     {
-        *initial_angle = specific_angles[0];
+        *initial_angle = specific_angles[0] * DEG2RAD;
         if (*initial_angle>=(2.0*PI-0.0001))
            *initial_angle -= 2.0*PI;   // Make sure the angle is not above or equal to 360 degrees.
     }
