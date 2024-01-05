@@ -18,6 +18,8 @@ from cbctmc.utils import get_folders_by_regex
 # order GPU ID by PCI bus ID
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
+import faulthandler
+
 import itk
 
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
@@ -38,6 +40,8 @@ from cbctmc.segmentation.utils import (
     merge_upper_body_muscle_segmentations,
 )
 from cbctmc.speedup.models import FlexUNet
+
+faulthandler.enable()
 
 
 @click.command()
@@ -101,6 +105,7 @@ from cbctmc.speedup.models import FlexUNet
 )
 @click.option("--reconstruct", is_flag=True)
 @click.option("--forward-projection", is_flag=True)
+@click.option("--no-clean", is_flag=True)
 @click.option(
     "--correspondence-model",
     type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
@@ -109,6 +114,11 @@ from cbctmc.speedup.models import FlexUNet
 @click.option(
     "--respiratory-signal",
     type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
+    default=None,
+)
+@click.option(
+    "--respiratory-signal-quantization",
+    type=int,
     default=None,
 )
 @click.option(
@@ -131,8 +141,10 @@ def run(
     n_projections: int,
     reconstruct: bool,
     forward_projection: bool,
+    no_clean: bool,
     correspondence_model: Path | None,
     respiratory_signal: Path | None,
+    respiratory_signal_quantization: int | None,
     loglevel: str,
 ):
     # set up logging
@@ -182,7 +194,6 @@ def run(
         # 3D MC simulation, i.e. no correspondence model and no respiratory signal
         mc_simulation_class = MCSimulation
         logger.info(f"This is a 3D simulation, thus using {mc_simulation_class}")
-        correspondence_model = None
         respiratory_signal = None
 
     logger.info(f"Simulation configs: {CONFIGS}")
@@ -237,16 +248,15 @@ def run(
 
             image_filepath = patient_folder / f"phase_{phase:02d}.nii"
 
-            simulation_already_prepared = all(
+            geometry_already_prepared = all(
                 (
                     (simulation_folder / "geometry_materials.nii.gz").exists(),
                     (simulation_folder / "geometry_densities.nii.gz").exists(),
-                    (simulation_folder / "density_fp.mha").exists(),
                     (simulation_folder / "geometry.pkl.gz").exists(),
                 )
             )
 
-            if not simulation_already_prepared:
+            if not geometry_already_prepared:
                 if segmenter is None:
                     segmentation_folder = (
                         patient_folder / f"segmentations/phase_{phase:02d}"
@@ -290,29 +300,30 @@ def run(
                     simulation_folder / "geometry_densities.nii.gz"
                 )
                 geometry.save(simulation_folder / "geometry.pkl.gz")
-
-                fp_geometry = create_geometry(
-                    start_angle=90, n_projections=n_projections
-                )
-                save_geometry(fp_geometry, simulation_folder / "geometry.xml")
-                if forward_projection:
-                    logger.info("Perform forward projection")
-                    image = prepare_image_for_rtk(
-                        image=geometry.densities,
-                        image_spacing=geometry.image_spacing,
-                        input_value_range=None,
-                        output_value_range=None,
-                    )
-                    density_forward_projection = project_forward(
-                        image,
-                        geometry=fp_geometry,
-                    )
-                    itk.imwrite(
-                        density_forward_projection,
-                        str(simulation_folder / "density_fp.mha"),
-                    )
             else:
                 geometry = MCGeometry.load(simulation_folder / "geometry.pkl.gz")
+
+            fp_geometry = create_geometry(start_angle=90, n_projections=n_projections)
+            save_geometry(fp_geometry, simulation_folder / "geometry.xml")
+            if (
+                forward_projection
+                and not (simulation_folder / "density_fp.mha").exists()
+            ):
+                logger.info("Perform forward projection")
+                image = prepare_image_for_rtk(
+                    image=geometry.densities,
+                    image_spacing=geometry.image_spacing,
+                    input_value_range=None,
+                    output_value_range=None,
+                )
+                density_forward_projection = project_forward(
+                    image,
+                    geometry=fp_geometry,
+                )
+                itk.imwrite(
+                    density_forward_projection,
+                    str(simulation_folder / "density_fp.mha"),
+                )
 
             for config_name, config in CONFIGS.items():
                 logger.info(
@@ -323,12 +334,15 @@ def run(
                 additional_run_kwargs = {}
                 if is_4d:
                     additional_run_kwargs["respiratory_signal"] = respiratory_signal
+                    additional_run_kwargs[
+                        "respiratory_signal_quantization"
+                    ] = respiratory_signal_quantization
 
                 simulation = mc_simulation_class(geometry=geometry, **config)
                 simulation.run_simulation(
                     output_folder=simulation_folder / config_name,
                     run_air_simulation=True,
-                    clean=True,
+                    clean=not no_clean,
                     gpu_ids=gpu,
                     force_rerun=False,
                     **additional_run_kwargs,
@@ -354,4 +368,37 @@ def run(
 
 
 if __name__ == "__main__":
-    run()
+    # run()
+
+    # for debugging
+    run(
+        [
+            "--data-folder",
+            "/datalake_fast/4d_ct_lung_uke_artifact_free",
+            "--output-folder",
+            "/datalake_fast/mc_output/4d",
+            "--phases",
+            "0",
+            "--gpu",
+            "0",
+            "--speedups",
+            "10.0",
+            "--regex",
+            "024.*",
+            "--segmenter-weights",
+            "/mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth",
+            "--segmenter-patch-overlap",
+            "0.25",
+            "--segmenter-patch-shape",
+            "496",
+            "496",
+            "32",
+            "--correspondence-model",
+            "/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl",
+            "--respiratory-signal",
+            "/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl",
+            "--respiratory-signal-quantization",
+            "20",
+            "--reconstruct",
+        ]
+    )

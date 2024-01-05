@@ -365,8 +365,8 @@ class MCGeometry:
         warped_densities = spatial_transformer(
             densities,
             transformation=vector_field,
-            interpolation="nearest",
-            mode=0,
+            mode="nearest",
+            default_value=0,
         )
         warped_densities = warped_densities[0, 0].cpu().numpy()
 
@@ -375,7 +375,7 @@ class MCGeometry:
             warped_mus = spatial_transformer(
                 mus,
                 transformation=vector_field,
-                interpolation="nearest",
+                mode="nearest",
                 default_value=0,
             )
             warped_mus = warped_mus[0, 0].cpu().numpy()
@@ -405,6 +405,7 @@ class MCGeometry:
 
     @classmethod
     def load(cls, filepath: PathLike) -> MCGeometry:
+        logger.info(f"Loading MCGeometry from {filepath}")
         with gzip.open(filepath, "rb") as f:
             instance = pickle.load(f)
 

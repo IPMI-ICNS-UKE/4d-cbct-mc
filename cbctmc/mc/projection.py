@@ -181,6 +181,10 @@ def get_projections_from_folder(
     projection_filepaths = [
         p for p in sorted(folder.glob("*")) if re.match(regex_pattern, p.name)
     ]
+    logger.debug(
+        f"Loading {len(projection_filepaths)} projections from {folder} "
+        f"in the following order: {projection_filepaths}"
+    )
 
     detector_pixel_size = (
         detector_size[0] / n_detector_pixels[0],

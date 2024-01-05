@@ -61,18 +61,12 @@ class RespiratorySignal:
         return len(self.signal) / self.sampling_frequency
 
     @staticmethod
-    def _quantize(signal, n_bins: int = 2) -> np.ndarray:
+    def quantize_signal(signal: np.ndarray, n_bins: int = 20) -> np.ndarray:
         bins = np.linspace(signal.min(), signal.max(), n_bins + 1)
         signal_bins = np.digitize(signal, bins=bins)
         # add half a bin width to get center the bins
         bin_width = bins[1] - bins[0]
         return bins[signal_bins - 1] + 0.5 * bin_width
-
-    def quantize_signal(self, n_bins: int = 2) -> Tuple[np.ndarray, np.ndarray]:
-        quantized_signal = self._quantize(self.signal, n_bins=n_bins)
-        quantized_dt_signal = self._quantize(self.dt_signal, n_bins=n_bins)
-
-        return quantized_signal, quantized_dt_signal
 
     def get_signal(self, n_bins: int = 2) -> np.ndarray:
         bins = np.linspace(self.signal.min(), self.signal.max(), n_bins + 1)
@@ -82,9 +76,20 @@ class RespiratorySignal:
         return bins[signal_bins - 1] + 0.5 * bin_width
 
     @staticmethod
-    def number_of_unique_samples(signal: np.ndarray, dt_signal: np.ndarray) -> int:
+    def get_unique_signals(
+        signal: np.ndarray, dt_signal: np.ndarray
+    ) -> dict[tuple[float, float], list[int]]:
         samples = np.stack((signal, dt_signal), axis=-1)
-        return len(np.unique(samples, axis=0))
+        unique_samples = np.unique(samples, axis=0)
+
+        unique_samples_dict = {}
+        for unique_sample in unique_samples:
+            # add unique sample to dict with all indices where it occurs
+            unique_samples_dict[tuple(unique_sample)] = np.where(
+                (samples == unique_sample).all(axis=1)
+            )[0].tolist()
+
+        return unique_samples_dict
 
     @classmethod
     def create_sin4(
@@ -168,18 +173,14 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     signal = RespiratorySignal.create_sin4(total_seconds=200)
-    plt.plot(signal.time, signal.signal)
-    plt.plot(signal.time, signal.dt_signal)
+    # plt.plot(signal.time, signal.signal)
+    # plt.plot(signal.time, signal.dt_signal)
 
     resampled_signal = signal.resample(15)
     plt.plot(resampled_signal.time, resampled_signal.signal)
     plt.plot(resampled_signal.time, resampled_signal.dt_signal)
 
-    # quantized_signal, quantized_dt_signal = signal.quantize_signal(n_bins=20)
-    # print(
-    #     RespiratorySignal.number_of_unique_samples(
-    #         quantized_signal, quantized_dt_signal
-    #     )
-    # )
-    # plt.plot(signal.time, quantized_signal)
-    # plt.plot(signal.time, quantized_dt_signal)
+    quantized_signal, quantized_dt_signal = signal.quantize_signal(n_bins=10)
+    print(RespiratorySignal.get_unique_signals(quantized_signal, quantized_dt_signal))
+    plt.plot(signal.time, quantized_signal)
+    plt.plot(signal.time, quantized_dt_signal)

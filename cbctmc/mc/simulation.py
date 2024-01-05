@@ -56,7 +56,7 @@ class BaseMCSimulation:
         self.xray_spectrum_filepath = xray_spectrum_filepath
         self.n_histories = n_histories
         self.projection_angles = projection_angles
-        self.n_projections = n_projections
+        self.n_projections = len(self.projection_angles) or n_projections
         self.angle_between_projections = angle_between_projections
         self.source_direction_cosines = source_direction_cosines
         self.n_detector_pixels = n_detector_pixels
@@ -81,7 +81,8 @@ class BaseMCSimulation:
             output_folder, gpu_ids=gpu_ids, run_air_simulation=False
         )
 
-    def _already_simulated(self, output_folder: PathLike) -> bool:
+    @staticmethod
+    def _already_simulated(output_folder: PathLike) -> bool:
         output_folder = Path(output_folder)
         # check if projections are already present
         return (output_folder / "projections_total.mha").is_file()
@@ -93,15 +94,9 @@ class BaseMCSimulation:
         gpu_ids: Sequence[int] | int = 0,
         force_rerun: bool = False,
         force_geometry_recompile: bool = False,
-    ):
+    ) -> Path | None:
         output_folder = Path(output_folder)
         gpu_ids = (gpu_ids,) if isinstance(gpu_ids, int) else gpu_ids
-
-        if self._already_simulated(output_folder) and not force_rerun:
-            logger.info(
-                f"Output folder {output_folder} is not empty, skipping simulation"
-            )
-            return
 
         logger.debug(f"Running simulation on {len(gpu_ids)} GPUs: {gpu_ids}")
 
@@ -228,13 +223,22 @@ class BaseMCSimulation:
                 container.stop()
                 logger.info("Docker container stopped")
 
+    @staticmethod
     def postprocess_simulation(
-        self,
         folder: PathLike,
         clean: bool = True,
+        stack_projections: bool = True,
         air_normalization: bool = True,
         air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
     ):
+        if air_normalization and not stack_projections:
+            raise ValueError(
+                "Cannot perform air normalization without stacking projections"
+            )
+
+        if not any((stack_projections, air_normalization, clean)):
+            return
+
         folder = Path(folder)
         projections = get_projections_from_folder(folder)
 
@@ -242,11 +246,12 @@ class BaseMCSimulation:
             # nothing to postprocess
             return
 
-        for mode in ("total", "unscattered", "scattered"):
-            projections_itk = projections_to_itk(projections, mode=mode)
-            output_filepath = folder / f"projections_{mode}.mha"
-            logger.info(f"Write projection stack {output_filepath}")
-            sitk.WriteImage(projections_itk, str(output_filepath))
+        if stack_projections:
+            for mode in ("total", "unscattered", "scattered"):
+                projections_itk = projections_to_itk(projections, mode=mode)
+                output_filepath = folder / f"projections_{mode}.mha"
+                logger.info(f"Write projection stack {output_filepath}")
+                sitk.WriteImage(projections_itk, str(output_filepath))
 
         if air_normalization:
             air_projection = MCProjection.from_file(
@@ -335,7 +340,7 @@ class BaseMCSimulation:
             "xray_spectrum_filepath": str(xray_spectrum_filepath),
         }
 
-        logger.info(
+        logger.debug(
             f"Creating MC-GPU input file with the following parameters: {params}"
         )
 
@@ -364,12 +369,21 @@ class MCSimulation(BaseMCSimulation):
         run_air_simulation: bool = True,
         air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
         clean: bool = True,
+        stack_projections: bool = True,
         gpu_ids: Sequence[int] | int = 0,
         force_rerun: bool = False,
         force_geometry_recompile: bool = False,
     ):
         if run_air_simulation:
             self.run_air_simulation(output_folder, gpu_ids=gpu_ids)
+
+        # check if already simulated
+        if self._already_simulated(output_folder) and not force_rerun:
+            logger.info(
+                f"Output folder {output_folder} already contains a "
+                f"finished simulation and {force_rerun=}. Skipping."
+            )
+            return
 
         # input_filepath is the filepath of the MCGPU input file inside
         # the docker container
@@ -380,9 +394,10 @@ class MCSimulation(BaseMCSimulation):
             force_geometry_recompile=force_geometry_recompile,
             output_suffix=output_suffix,
         )
+        logger.info("Simulation fully prepared")
 
         # run simulation
-        log_output_filepath = output_folder / "run.log"
+        log_output_filepath = output_folder / f"run{output_suffix}.log"
         self._run_simulation(
             input_filepath=input_filepath,
             log_output_filepath=log_output_filepath,
@@ -393,6 +408,7 @@ class MCSimulation(BaseMCSimulation):
         self.postprocess_simulation(
             output_folder,
             clean=clean,
+            stack_projections=stack_projections,
             air_normalization=run_air_simulation,
             air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
         )
@@ -443,28 +459,74 @@ class MCSimulation4D:
     def run_simulation(
         self,
         respiratory_signal: RespiratorySignal,
+        respiratory_signal_quantization: int | None,
         output_folder: PathLike,
         run_air_simulation: bool = True,
         air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
         clean: bool = True,
+        stack_projections: bool = True,
         gpu_ids: Sequence[int] | int = 0,
         force_rerun: bool = False,
         force_geometry_recompile: bool = False,
     ):
+        output_folder = Path(output_folder)
+        output_folder.mkdir(parents=True, exist_ok=True)
         # resample respiratory signal to match frame rate of CBCT scan
-        # then the signal index i corresponds to the projection index i
+        # then the signal index corresponds to the projection index
         respiratory_signal = respiratory_signal.resample(self.frame_rate)
 
-        start_angle = 270.0
-        for i_projection in range(self.n_projections):
-            signal = respiratory_signal.signal[i_projection]
-            dt_signal = respiratory_signal.dt_signal[i_projection]
+        # now clip the signal to the number of projections, i.e. signal has the
+        # the length of the number of projections (one signal value per projection)
+        signal = respiratory_signal.signal[: self.n_projections]
+        dt_signal = respiratory_signal.dt_signal[: self.n_projections]
 
+        # quantize the signal if requested
+        if respiratory_signal_quantization:
+            signal = RespiratorySignal.quantize_signal(
+                signal, n_bins=respiratory_signal_quantization
+            )
+            dt_signal = RespiratorySignal.quantize_signal(
+                dt_signal, n_bins=respiratory_signal_quantization
+            )
+
+        # save signals to file
+        header = (
+            "quantized respiratory signal and its derivative\n"
+            f"signal quantization: {respiratory_signal_quantization} bins\n"
+            "signal dt_signal"
+        )
+
+        np.savetxt(
+            output_folder / "signal.txt",
+            np.stack((signal, dt_signal)).T,
+            header=header,
+            fmt="%.6f",
+        )
+
+        # get the unique combinations of signal and dt_signal
+        unique_signals = RespiratorySignal.get_unique_signals(
+            signal=signal, dt_signal=dt_signal
+        )
+        logger.info(f"Unique signals: {len(unique_signals)}")
+
+        # run one air simulation for all following simulations
+        MCSimulation.run_air_simulation(output_folder, gpu_ids=gpu_ids)
+
+        start_angle = 270.0
+        for unique_signal, projection_indices in unique_signals.items():
+            # warp the geometry, i.e., materials and densities, according to the
+            # correspondence model using the signal and dt_signal
+            signal, dt_signal = unique_signal
             warped_geometry = self._warp_geometry(signal, dt_signal)
+
             projection_angles = [
                 start_angle + i_projection * self.angle_between_projections
+                for i_projection in projection_indices
             ]
-            logger.debug(f"select the following projection angles: {projection_angles}")
+            logger.debug(
+                f"Selected the {len(projection_angles)} projection angles for "
+                f"{signal=} and {dt_signal=}: {projection_angles}"
+            )
             simulation = MCSimulation(
                 geometry=warped_geometry,
                 material_filepaths=self.material_filepaths,
@@ -482,7 +544,19 @@ class MCSimulation4D:
             simulation.run_simulation(
                 output_folder=output_folder,
                 run_air_simulation=False,
+                air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
                 clean=False,
+                stack_projections=False,
                 gpu_ids=gpu_ids,
+                force_rerun=force_rerun,
+                force_geometry_recompile=force_geometry_recompile,
                 output_suffix=f"_{signal:09.6f}_{dt_signal:09.6f}",
             )
+
+        BaseMCSimulation.postprocess_simulation(
+            output_folder,
+            clean=clean,
+            stack_projections=stack_projections,
+            air_normalization=run_air_simulation,
+            air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
+        )
