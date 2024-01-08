@@ -179,7 +179,7 @@ def run(
             simulation_folder / config_name,
             run_air_simulation=True,
             clean=True,
-            gpu_ids=gpu,
+            gpu_ids=[gpu],
             force_rerun=False,
         )
 

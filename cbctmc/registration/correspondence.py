@@ -360,32 +360,21 @@ if __name__ == "__main__":
     masks = [read_image(mask_filepath) for mask_filepath in mask_filepaths]
     masks = np.stack(masks, axis=0)
 
-    # timepoints = np.linspace(0, 5, 10)
-    # signal = RespiratorySignal.from_masks(
-    #     masks=masks,
-    #     timepoints=timepoints,
-    #     target_total_seconds=5.0,
-    #     target_sampling_frequency=25.0
-    # )
-    #
-    # signal_timepoints = np.interp(
-    #     timepoints, signal.time, signal.signal,
-    # )
-    #
-    #
-    # plt.plot(signal.time, signal.signal)
-    # plt.plot(signal.time, signal.dt_signal)
-    # plt.scatter(timepoints, signal_timepoints)
-    timepoints = np.linspace(0.0, 5.0, 10)
-    respiratory_signal = RespiratorySignal.from_masks(
+    timepoints = np.linspace(0, 5, 10)
+    signal = RespiratorySignal.from_masks(
         masks=masks,
         timepoints=timepoints,
-        target_sampling_frequency=25.0,
         target_total_seconds=60.0,
+        target_sampling_frequency=25.0,
     )
-    respiratory_signal.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl")
 
-    model = CorrespondenceModel.build_default(
-        images=images, masks=masks, timepoints=timepoints
-    )
-    model.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl")
+    plt.plot(signal.time, signal.signal)
+    plt.plot(signal.time, signal.dt_signal)
+    # plt.scatter(timepoints, signal_timepoints)
+
+    # respiratory_signal.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl")
+    #
+    # model = CorrespondenceModel.build_default(
+    #     images=images, masks=masks, timepoints=timepoints
+    # )
+    # model.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl")

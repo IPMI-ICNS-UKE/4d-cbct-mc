@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
     mc_defaults = DefaultMCSimulationParameters()
 
-    N_PROJECTIONS = 16
+    N_PROJECTIONS = 128
 
     CONFIG = {
         "n_projections": N_PROJECTIONS,
@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
     GPUS = (0, 1)
 
-    output_folder = Path("/datalake_fast/mc_test/mc_output/geometry_test_new")
+    output_folder = Path("/datalake_fast/mc_test/mc_output/geometry_test_new2")
 
     output_folder.mkdir(parents=True, exist_ok=True)
 
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     simulation.run_simulation(
         output_folder / run_folder,
         run_air_simulation=True,
-        clean=True,
+        clean=False,
         gpu_ids=GPUS,
         force_rerun=False,
     )

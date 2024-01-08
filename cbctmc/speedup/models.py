@@ -138,13 +138,13 @@ class MCSpeedUpNet(nn.Module):
         self,
         in_channels: int = 1,
         out_channels: int = 1,
-        growth_rate: int = 32,
+        growth_rate: int = 16,
         n_blocks: int = 2,
         n_block_layers: int = 4,
         convolution_block: Type[_ConvNormActivation] = ConvInstanceNormMish2D,
         local_feature_fusion_channels: int = 32,
-        pre_block_channels: int = 32,
-        post_block_channels: int = 32,
+        pre_block_channels: int | None = 32,
+        post_block_channels: int | None = 32,
     ):
         super().__init__()
 
@@ -209,6 +209,7 @@ class MCSpeedUpNet(nn.Module):
                     in_channels=self.post_block_channels,
                     out_channels=self.out_channels,
                     kernel_size=(3, 3),
+                    padding_mode="replicate",
                     padding="same",
                 )
                 # no activation function here, i.e. linear activation
@@ -219,6 +220,7 @@ class MCSpeedUpNet(nn.Module):
                 + self.n_blocks * self.local_feature_fusion_channels,
                 out_channels=self.out_channels,
                 kernel_size=(1, 1),
+                activation=None,
             )
 
             self.post_blocks = nn.Identity()
@@ -260,6 +262,70 @@ class MCSpeedUpNet(nn.Module):
             pre_block_channels=self.pre_block_channels,
             post_block_channels=self.post_block_channels,
         )
+
+
+class MCSpeedUpNetSeparated(nn.Module):
+    def __init__(
+        self,
+        in_channels: int = 1,
+        out_channels: int = 1,
+        growth_rate: int = 16,
+        n_blocks: int = 2,
+        n_block_layers: int = 4,
+        convolution_block: Type[_ConvNormActivation] = ConvInstanceNormMish2D,
+        local_feature_fusion_channels: int = 32,
+        pre_block_channels: int | None = 32,
+        post_block_channels: int | None = 32,
+    ):
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.growth_rate = growth_rate
+        self.n_blocks = n_blocks
+        self.n_block_layers = n_block_layers
+        self.convolution_block = convolution_block
+        self.local_feature_fusion_channels = local_feature_fusion_channels
+
+        self.pre_block_channels = pre_block_channels
+        self.post_block_channels = post_block_channels
+
+        self.mean_net = MCSpeedUpNet(
+            in_channels=in_channels,
+            out_channels=out_channels // 2,
+            growth_rate=growth_rate,
+            n_blocks=n_blocks,
+            n_block_layers=n_block_layers,
+            convolution_block=convolution_block,
+            local_feature_fusion_channels=local_feature_fusion_channels,
+            pre_block_channels=pre_block_channels,
+            post_block_channels=post_block_channels,
+        )
+        self.var_net = MCSpeedUpNet(
+            in_channels=in_channels,
+            out_channels=out_channels // 2,
+            growth_rate=growth_rate,
+            n_blocks=n_blocks,
+            n_block_layers=n_block_layers,
+            convolution_block=convolution_block,
+            local_feature_fusion_channels=local_feature_fusion_channels,
+            pre_block_channels=pre_block_channels,
+            post_block_channels=post_block_channels,
+        )
+
+    def freeze_mean_net(self, freeze: bool = True):
+        for param in self.mean_net.parameters():
+            param.requires_grad = not freeze
+
+    def freeze_var_net(self, freeze: bool = True):
+        for param in self.var_net.parameters():
+            param.requires_grad = not freeze
+
+    def forward(self, x):
+        mean = self.mean_net(x)
+        var = self.var_net(x)
+
+        return torch.cat((mean, var), dim=1)
 
 
 class FlexUNet(nn.Module):

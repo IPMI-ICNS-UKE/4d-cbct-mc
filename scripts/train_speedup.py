@@ -1,3 +1,4 @@
+import torch
 from ipmi.common.logger import init_fancy_logging
 from sklearn.model_selection import train_test_split
 from torch.optim import Adam
@@ -5,7 +6,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 from torch.utils.data import DataLoader
 
 from cbctmc.speedup.dataset import MCSpeedUpDataset
-from cbctmc.speedup.models import MCSpeedUpNet
+from cbctmc.speedup.models import MCSpeedUpNet, MCSpeedUpNetSeparated
 from cbctmc.speedup.trainer import MCSpeedUpTrainer
 
 if __name__ == "__main__":
@@ -18,9 +19,10 @@ if __name__ == "__main__":
     logger.setLevel(logging.DEBUG)
     logging.getLogger("cbctmc").setLevel(logging.DEBUG)
 
-    DATA_FOLDER = "/datalake2/mc_speedup_total_normalized"
+    DATA_FOLDER = "/datalake3/speedup_dataset"
+    RUN_FOLDER = "/datalake3/speedup_runs"
 
-    SPEEDUP_MODE = "low_10"
+    SPEEDUP_MODE = "speedup_2.00x"
     USE_FORWARD_PROJECTION = True
     DEVICE = "cuda:0"
 
@@ -65,11 +67,11 @@ if __name__ == "__main__":
     )
 
     train_data_loader = DataLoader(
-        train_dataset, batch_size=16, shuffle=True, num_workers=4
+        train_dataset, batch_size=6, shuffle=True, num_workers=0
     )
 
     test_data_loader = DataLoader(
-        test_dataset, batch_size=16, shuffle=False, num_workers=0
+        test_dataset, batch_size=6, shuffle=False, num_workers=0
     )
 
     # model = FlexUNet(
@@ -89,20 +91,33 @@ if __name__ == "__main__":
     #     return_bottleneck=False,
     # )
 
-    model = MCSpeedUpNet(in_channels=2 if USE_FORWARD_PROJECTION else 1, out_channels=2)
+    # model = MCSpeedUpNet(
+    #     in_channels=2 if USE_FORWARD_PROJECTION else 1,
+    #     out_channels=2,
+    # )
+    model = MCSpeedUpNetSeparated(
+        in_channels=2 if USE_FORWARD_PROJECTION else 1, out_channels=2, growth_rate=8
+    )
 
-    optimizer = Adam(params=model.parameters(), lr=1e-4)
+    # load pre-trained (mean) model
+    state = torch.load(
+        "/datalake3/speedup_runs/2024-01-04T17:33:25.900796_run_2318f5f7659844e6b4bd685b/models/validation/step_440000.pth"
+    )
+    model.load_state_dict(state["model"])
+
+    optimizer = Adam(params=model.parameters(), lr=1e-3)
     scheduler = ExponentialLR(optimizer, gamma=0.99999)
     trainer = MCSpeedUpTrainer(
         model=model,
         optimizer=optimizer,
         train_loader=train_data_loader,
         val_loader=test_data_loader,
-        run_folder="/datalake2/runs/mc_speedup",
-        experiment_name="mc_speedup",
+        run_folder=RUN_FOLDER,
+        experiment_name="mc_speedup_var_training",
         device=DEVICE,
         scheduler=scheduler,
         use_forward_projection=USE_FORWARD_PROJECTION,
+        n_pretrain_steps=0,
         debug=True,
     )
 
@@ -116,4 +131,4 @@ if __name__ == "__main__":
         }
     )
 
-    trainer.run(steps=100_00_00, validation_interval=1_000, save_interval=1_000)
+    trainer.run(steps=100_000_000, validation_interval=5_000, save_interval=1_000)

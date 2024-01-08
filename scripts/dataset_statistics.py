@@ -30,20 +30,21 @@ if __name__ == "__main__":
         146,
     )
 
-    possible_folders = [
-        Path("/home/crohling/amalthea/data/results/"),
-        Path("/mnt/gpu_server/crohling/data/results"),
-    ]
-    folder = next(p for p in possible_folders if p.exists())
+    DATA_FOLDER = "/datalake3/speedup_dataset"
+
+    SPEEDUP_MODE = "speedup_2.00x"
 
     dataset = MCSpeedUpDataset.from_folder(
-        folder=folder, patient_ids=patient_ids, runs=range(15)
+        folder=DATA_FOLDER,
+        mode=SPEEDUP_MODE,
+        patient_ids=patient_ids,
     )
 
     low_photon_stats = {"max": [], "p99": []}
     high_photon_stats = {"max": [], "p99": []}
 
-    for data in tqdm(dataset, desc="Calculating dataset stats"):
+    pbar = tqdm(dataset, desc="Calculating dataset stats")
+    for data in pbar:
         if not data:
             break
         low_photon_stats["max"].append(data["low_photon"].max())
@@ -52,6 +53,11 @@ if __name__ == "__main__":
         high_photon_stats["max"].append(data["high_photon"].max())
         high_photon_stats["p99"].append(np.percentile(data["high_photon"], 99))
 
-    for stats in (low_photon_stats, high_photon_stats):
-        for key, value in stats.items():
-            stats[key] = np.mean(value)
+        pbar.set_postfix(
+            {
+                "low_photon_max": np.max(low_photon_stats["max"]),
+                "low_photon_p99": np.mean(low_photon_stats["p99"]),
+                "high_photon_max": np.max(high_photon_stats["max"]),
+                "high_photon_p99": np.mean(high_photon_stats["p99"]),
+            }
+        )

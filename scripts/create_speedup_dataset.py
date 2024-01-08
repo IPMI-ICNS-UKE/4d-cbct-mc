@@ -14,7 +14,7 @@ def write_projection_slices(
     output_folder: Path,
 ):
     projections = sitk.GetArrayFromImage(projections)
-
+    projections = np.asarray(projections, dtype=np.float32)
     for i_projection, projection in enumerate(projections):
         filename = f"pat_{patient_id:03d}__phase_{i_phase:02d}__{mode}__proj_{i_projection:03d}.npy"
         output_filepath = output_folder / filename
@@ -24,10 +24,17 @@ def write_projection_slices(
 
 if __name__ == "__main__":
     PHASES = (0,)
-    MODES = ("high", "low_2", "low_5", "low_10")
+    MODES = (
+        # "reference",
+        # "speedup_2.00x",
+        "speedup_5.00x",
+        "speedup_10.00x",
+        "speedup_20.00x",
+        "speedup_50.00x",
+    )
 
-    mc_root_path = Path("/datalake2/mc_output")
-    output_folder = Path("/datalake2/mc_speedup_total_normalized")
+    mc_root_path = Path("/datalake3/nas_io/anarchy/4d_cbct_mc/speedup")
+    output_folder = Path("/datalake3/speedup_dataset")
     output_folder.mkdir(exist_ok=True)
 
     logging.getLogger("cbctmc").setLevel(logging.INFO)

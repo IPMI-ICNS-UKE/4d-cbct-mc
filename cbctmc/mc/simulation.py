@@ -523,6 +523,10 @@ class MCSimulation4D:
                 start_angle + i_projection * self.angle_between_projections
                 for i_projection in projection_indices
             ]
+            # temporary bug fix for 0th projection always at 270deg
+            # source direction of projection 0 of each simulation is wrong here
+            projection_angles = projection_angles[0:1] + projection_angles
+
             logger.debug(
                 f"Selected the {len(projection_angles)} projection angles for "
                 f"{signal=} and {dt_signal=}: {projection_angles}"

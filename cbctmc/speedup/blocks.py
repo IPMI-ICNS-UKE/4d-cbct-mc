@@ -22,19 +22,24 @@ class _ConvNormActivation(nn.Module):
             out_channels=out_channels,
             kernel_size=kernel_size,
             padding=padding,
+            padding_mode="replicate",
             bias=False,
         )
         if normalization:
             self.normalization = normalization(out_channels)
         else:
             self.normalization = None
-        self.activation = activation()
+        if activation:
+            self.activation = activation()
+        else:
+            self.activation = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.convolution(x)
         if self.normalization:
             x = self.normalization(x)
-        x = self.activation(x)
+        if self.activation:
+            x = self.activation(x)
 
         return x
 
@@ -84,11 +89,12 @@ class ConvInstanceNormMish2D(_ConvNormActivation):
         out_channels: int,
         kernel_size: Union[int, Tuple[int, ...]],
         padding="same",
+        activation=nn.Mish,
     ):
         super().__init__(
             convolution=nn.Conv2d,
             normalization=nn.InstanceNorm2d,
-            activation=nn.Mish,
+            activation=activation,
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,

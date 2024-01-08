@@ -229,7 +229,7 @@ class MCSpeedUpDataset(Dataset):
                         "forward_projection_filepath": root_folder
                         / f"pat_{patient_id:03d}__phase_{i_phase:02d}__fp__proj_{i_projection:03d}.npy",
                         "high_photon_filepath": root_folder
-                        / f"pat_{patient_id:03d}__phase_{i_phase:02d}__high__proj_{i_projection:03d}.npy",
+                        / f"pat_{patient_id:03d}__phase_{i_phase:02d}__reference__proj_{i_projection:03d}.npy",
                     }
 
                     if all(

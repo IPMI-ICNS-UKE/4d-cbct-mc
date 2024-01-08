@@ -2802,10 +2802,7 @@ int report_image(char* file_name_output, struct detector_struct* detector_data, 
   // -- Report data:
   printf("\n\n          *** IMAGE TALLY PERFORMANCE REPORT ***\n");
 
-  if(num_projections!=1)   // Output the projection angle when simulating a CT:
-  {
-    printf("              CT projection %d of %d: angle from X axis = %lf \n", current_projection+1, num_projections, current_angle);
-  }
+  printf("              CT projection %d of %d: angle from X axis = %lf \n", current_projection+1, num_projections, current_angle);
 
   printf("              Simulated x rays:    %lld\n", total_histories);
   printf("              Simulation time [s]: %.2f\n", time_elapsed);
@@ -2841,16 +2838,14 @@ int report_image(char* file_name_output, struct detector_struct* detector_data, 
   fprintf(file_ptr, "#  Pixel value units: eV/cm^2 per history (energy fluence).\n");
 
 
-  if(num_projections!=1)   // Output the projection angle when simulating a CT:
-  {
-    fprintf(file_ptr, "#  CT projection %d of %d: angle from X axis = %lf \n", current_projection+1, num_projections, current_angle);
-  }
+  fprintf(file_ptr, "#  CT projection %d of %d: angle from X axis = %lf (mod 360deg), %lf (no mod 360deg) \n", current_projection+1, num_projections, current_angle, sequential_current_angle);
+
 
   fprintf(file_ptr, "#  Focal spot position = (%.8f,%.8f,%.8f), cone beam direction = (%.8f,%.8f,%.8f)\n", source_data[current_projection].position.x, source_data[current_projection].position.y, source_data[current_projection].position.z, source_data[current_projection].direction.x, source_data[current_projection].direction.y, source_data[current_projection].direction.z);
   if (*enable_specific_angles==0)
     fprintf(file_ptr, "#  Specific angles enabled: NO\n");
   else
-      fprintf(file_ptr, "#  Specific angles enabled: YES\n");
+    fprintf(file_ptr, "#  Specific angles enabled: YES\n");
 
   fprintf(file_ptr, "#  Pixel size:  %lf x %lf = %lf cm^2\n", 1.0/(double)(detector_data[0].inv_pixel_size_X), 1.0/(double)(detector_data[0].inv_pixel_size_Z), 1.0/(double)(detector_data[0].inv_pixel_size_X*detector_data[0].inv_pixel_size_Z));
 
