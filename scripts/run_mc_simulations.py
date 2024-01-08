@@ -122,6 +122,11 @@ faulthandler.enable()
     default=None,
 )
 @click.option(
+    "--respiratory-signal-scaling",
+    type=float,
+    default=1.0,
+)
+@click.option(
     "--loglevel",
     type=click.Choice(["debug", "info", "warning", "error", "critical"]),
     default="info",
@@ -145,6 +150,7 @@ def run(
     correspondence_model: Path | None,
     respiratory_signal: Path | None,
     respiratory_signal_quantization: int | None,
+    respiratory_signal_scaling: float,
     loglevel: str,
 ):
     # set up logging
@@ -187,10 +193,12 @@ def run(
         logger.info(f"Load respiratory signal: {respiratory_signal}")
         respiratory_signal = RespiratorySignal.load(respiratory_signal)
 
-        # TODO remove:
-        # scale signal by factor 2
-        respiratory_signal.signal *= 2
-        respiratory_signal.dt_signal *= 2
+        if respiratory_signal_scaling != 1:
+            logger.info(
+                f"Scale respiratory signal by factor {respiratory_signal_scaling}"
+            )
+            respiratory_signal.signal *= respiratory_signal_scaling
+            respiratory_signal.dt_signal *= respiratory_signal_scaling
 
         # add correspondence model to each config entry
         for config in CONFIGS.values():
