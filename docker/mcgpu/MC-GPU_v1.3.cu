@@ -2790,19 +2790,21 @@ int report_image(char* file_name_output, struct detector_struct* detector_data, 
   {
       current_angle = (initial_angle+current_projection*D_angle)*RAD2DEG;
       sequential_current_angle = current_angle;
-      if (current_angle>=(360-0.0001))
+      if (current_angle>=(360-0.0001)) {
         current_angle -= 360;
-  } else
+        }
+
+  } else {
       current_angle = specific_angles[current_projection];
       sequential_current_angle = current_angle;
+      }
 
   char file_name_output_with_angle[253];
   sprintf(file_name_output_with_angle, "%s_%010.6fdeg", file_name_output, sequential_current_angle);   // Create the output file name with the input name + projection angle
 
   // -- Report data:
   printf("\n\n          *** IMAGE TALLY PERFORMANCE REPORT ***\n");
-
-  printf("              CT projection %d of %d: angle from X axis = %lf \n", current_projection+1, num_projections, current_angle);
+  printf("              CT projection %d of %d: angle from X axis = %lf (initial angle=%lf)\n", current_projection+1, num_projections, current_angle, initial_angle);
 
   printf("              Simulated x rays:    %lld\n", total_histories);
   printf("              Simulation time [s]: %.2f\n", time_elapsed);
