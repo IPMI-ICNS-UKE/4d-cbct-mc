@@ -66,7 +66,7 @@ if __name__ == "__main__":
     GPU_ID = 0
     DEVICE = f"cuda:{GPU_ID}"
 
-    gaps = np.linspace(0.25, 4.0, 16, endpoint=True)
+    gaps = [0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.50, 4.00]
 
     metrics = {}
     for speedup_mode in SPEEDUP_MODES:

@@ -1143,12 +1143,12 @@ class MCLinePairPhantomGeometry(MCWaterPhantomGeometry):
         self.densities[mask] = self.line_material.density
 
 
-if __name__ == "__main__":
-    geometry = MCLinePairPhantomGeometry(
-        line_gap=4,
-        image_spacing=(0.25, 0.25, 0.25),
-        radius=30,
-        length=30,
-        shape=(250, 250, 125),
-    )
-    geometry.save_density_image("/datalake2/mc_test/geometry_densities.nii.gz")
+# if __name__ == "__main__":
+# geometry = MCLinePairPhantomGeometry(
+#     line_gap=4,
+#     image_spacing=(0.25, 0.25, 0.25),
+#     radius=30,
+#     length=30,
+#     shape=(250, 250, 125),
+# )
+# geometry.save_density_image("/datalake2/mc_test/geometry_densities.nii.gz")

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Sequence, Tuple
 
 import numpy as np
+import pkg_resources
 import SimpleITK as sitk
 import torch
 
@@ -307,3 +308,8 @@ def get_folders_by_regex(root: Path, regex: str):
                 f"Skipping {entry}, as it does not match "
                 f"regex pattern {pattern.pattern}"
             )
+
+
+def get_asset_filepath(name: str) -> Path:
+    folder = pkg_resources.resource_filename("cbctmc", f"assets/{name}")
+    return Path(folder)

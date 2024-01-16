@@ -13,7 +13,7 @@ from torch import nn
 from cbctmc.mc.respiratory import RespiratorySignal
 from cbctmc.reconstruction.reconstruction import reconstruct_3d
 from cbctmc.registration.correspondence import CorrespondenceModel
-from cbctmc.utils import get_folders_by_regex
+from cbctmc.utils import get_asset_filepath, get_folders_by_regex
 
 # order GPU ID by PCI bus ID
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -30,7 +30,7 @@ from cbctmc.forward_projection import (
     project_forward,
     save_geometry,
 )
-from cbctmc.mc.geometry import MCCIRSPhantomGeometry, MCGeometry
+from cbctmc.mc.geometry import MCCatPhan604Geometry, MCCIRSPhantomGeometry, MCGeometry
 from cbctmc.mc.simulation import MCSimulation, MCSimulation4D
 from cbctmc.segmentation.labels import LABELS
 from cbctmc.segmentation.segmenter import MCSegmenter
@@ -137,6 +137,10 @@ faulthandler.enable()
     is_flag=True,
 )
 @click.option(
+    "--catphan-phantom",
+    is_flag=True,
+)
+@click.option(
     "--dry-run",
     is_flag=True,
 )
@@ -167,6 +171,7 @@ def run(
     respiratory_signal_quantization: int | None,
     respiratory_signal_scaling: float,
     cirs_phantom: bool,
+    catphan_phantom: bool,
     dry_run: bool,
     loglevel: str,
 ):
@@ -267,6 +272,14 @@ def run(
     else:
         segmenter = None
 
+    if catphan_phantom:
+        geometry_filepath = get_asset_filepath("geometries/catphan604_geometry.pkl.gz")
+        geometry_class = MCCatPhan604Geometry
+    elif cirs_phantom:
+        geometry_class = MCCIRSPhantomGeometry
+    else:
+        geometry_class = MCGeometry
+
     if geometry_filepath:
         patients = [Path(geometry_filepath).parent]
     else:
@@ -287,10 +300,10 @@ def run(
             )
             simulation_folder.mkdir(parents=True, exist_ok=True)
 
-            geometry_class = MCCIRSPhantomGeometry if cirs_phantom else MCGeometry
             geometry = None
             if geometry_filepath is not None:
                 logger.info(f"Load geometry from {geometry_filepath}")
+
                 geometry = geometry_class.load(geometry_filepath)
                 geometry.save_material_segmentation(
                     simulation_folder / "geometry_materials.nii.gz"
