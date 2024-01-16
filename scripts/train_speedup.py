@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from ipmi.common.logger import init_fancy_logging
 from sklearn.model_selection import train_test_split
 from torch.optim import Adam
@@ -6,7 +7,12 @@ from torch.optim.lr_scheduler import ExponentialLR
 from torch.utils.data import DataLoader
 
 from cbctmc.speedup.dataset import MCSpeedUpDataset
-from cbctmc.speedup.models import MCSpeedUpNet, MCSpeedUpNetSeparated
+from cbctmc.speedup.models import (
+    FlexUNet,
+    MCSpeedUpNet,
+    MCSpeedUpNetSeparated,
+    MCSpeedUpUNet,
+)
 from cbctmc.speedup.trainer import MCSpeedUpTrainer
 
 if __name__ == "__main__":
@@ -22,9 +28,21 @@ if __name__ == "__main__":
     DATA_FOLDER = "/datalake3/speedup_dataset"
     RUN_FOLDER = "/datalake3/speedup_runs"
 
-    SPEEDUP_MODE = "speedup_2.00x"
+    SPEEDUP_MODES = [
+        "speedup_2.00x",
+        "speedup_5.00x",
+        "speedup_10.00x",
+        "speedup_20.00x",
+        "speedup_50.00x",
+    ]
     USE_FORWARD_PROJECTION = True
     DEVICE = "cuda:0"
+
+    # broken patients:
+    # 22: 20x 50x
+    # 24: 20x 50x
+    # 32: 20x 50x
+    # 33 20x
 
     patient_ids = [
         22,
@@ -52,78 +70,58 @@ if __name__ == "__main__":
     train_patients, test_patients = train_test_split(
         patient_ids, train_size=0.75, random_state=42
     )
+    # test_patients = [22, 24, 69, 91, 121, 132]
     logger.info(f"Train patients ({len(train_patients)}): {train_patients}")
     logger.info(f"Test patients ({len(test_patients)}): {test_patients}")
 
     train_dataset = MCSpeedUpDataset.from_folder(
         folder=DATA_FOLDER,
-        mode=SPEEDUP_MODE,
+        modes=SPEEDUP_MODES,
         patient_ids=train_patients,
     )
     test_dataset = MCSpeedUpDataset.from_folder(
         folder=DATA_FOLDER,
-        mode=SPEEDUP_MODE,
+        modes=SPEEDUP_MODES,
         patient_ids=test_patients,
     )
 
     train_data_loader = DataLoader(
-        train_dataset, batch_size=6, shuffle=True, num_workers=0
+        train_dataset, batch_size=6, shuffle=True, num_workers=4
     )
 
     test_data_loader = DataLoader(
         test_dataset, batch_size=6, shuffle=False, num_workers=0
     )
 
-    # model = FlexUNet(
-    #     n_channels=2 if USE_FORWARD_PROJECTION else 1,
-    #     n_classes=2,
-    #     n_levels=6,
-    #     filter_base=32,
-    #     n_filters=None,
-    #     convolution_layer=nn.Conv2d,
-    #     downsampling_layer=nn.MaxPool2d,
-    #     upsampling_layer=nn.Upsample,
-    #     norm_layer=nn.BatchNorm2d,
-    #     skip_connections=True,
-    #     convolution_kwargs=None,
-    #     downsampling_kwargs=None,
-    #     upsampling_kwargs=None,
-    #     return_bottleneck=False,
-    # )
-
-    # model = MCSpeedUpNet(
-    #     in_channels=2 if USE_FORWARD_PROJECTION else 1,
-    #     out_channels=2,
-    # )
-    model = MCSpeedUpNetSeparated(
-        in_channels=2 if USE_FORWARD_PROJECTION else 1, out_channels=2, growth_rate=8
+    model = MCSpeedUpUNet(
+        in_channels=2 if USE_FORWARD_PROJECTION else 1, out_channels=2
     )
 
     # load pre-trained (mean) model
     state = torch.load(
-        "/datalake3/speedup_runs/2024-01-04T17:33:25.900796_run_2318f5f7659844e6b4bd685b/models/validation/step_440000.pth"
+        "/datalake3/speedup_runs/2024-01-09T16:17:24.936806_run_da9db22f001145f79edbf6da/models/training/step_170000.pth"
     )
-    model.load_state_dict(state["model"])
+    model.load_state_dict(state["model"], strict=False)
 
-    optimizer = Adam(params=model.parameters(), lr=1e-3)
+    optimizer = Adam(params=model.parameters(), lr=1e-4)
     scheduler = ExponentialLR(optimizer, gamma=0.99999)
     trainer = MCSpeedUpTrainer(
         model=model,
         optimizer=optimizer,
         train_loader=train_data_loader,
         val_loader=test_data_loader,
-        run_folder=RUN_FOLDER,
-        experiment_name="mc_speedup_var_training",
+        run_folder=f"{RUN_FOLDER}_all_speedups",
+        experiment_name=f"mc_speedup_unet_all_speedups",
         device=DEVICE,
         scheduler=scheduler,
         use_forward_projection=USE_FORWARD_PROJECTION,
-        n_pretrain_steps=0,
+        n_pretrain_steps=10_000,
         debug=True,
     )
 
     trainer.add_run_params(
         {
-            "speedup_mode": SPEEDUP_MODE,
+            "speedup_mode": "all",
             "train_patients": train_patients,
             "test_patients": test_patients,
             "use_forward_projection": USE_FORWARD_PROJECTION,
@@ -131,4 +129,4 @@ if __name__ == "__main__":
         }
     )
 
-    trainer.run(steps=100_000_000, validation_interval=5_000, save_interval=1_000)
+    trainer.run(steps=10_000_000, validation_interval=10_000, save_interval=1_000)

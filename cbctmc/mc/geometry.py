@@ -286,6 +286,7 @@ class MaterialMapperPipeline(
         stomach_segmentation: np.ndarray | PathLike | None = None,
         lung_segmentation: np.ndarray | PathLike | None = None,
         lung_vessel_segmentation: np.ndarray | PathLike | None = None,
+        overwrite_rules: dict | None = None,
         model: nn.Module | None = None,
         model_device: str = "cuda",
     ):
@@ -337,6 +338,16 @@ class MCGeometry:
         self.image_direction = image_direction
         self.image_origin = image_origin
 
+    def copy(self):
+        return self.__class__(
+            materials=self.materials.copy(),
+            densities=self.densities.copy(),
+            mus=self.mus.copy() if self.mus is not None else None,
+            image_spacing=self.image_spacing,
+            image_direction=self.image_direction,
+            image_origin=self.image_origin,
+        )
+
     def warp(self, vector_field: np.ndarray, device: str = "cpu") -> MCGeometry:
         # check vector_field shape: (batch, n_spatial_dims, x_size, y_size, z_size)
         if vector_field.ndim != 5:
@@ -354,19 +365,21 @@ class MCGeometry:
             self.densities[None, None, ...], dtype=torch.float32
         )
 
+        air_material = MATERIALS_125KEV["air"]
+
         spatial_transformer = SpatialTransformer().to(device)
         warped_materials = spatial_transformer(
             materials,
             transformation=vector_field,
             mode="nearest",
-            default_value=0,
+            default_value=air_material.number,
         )
         warped_materials = warped_materials[0, 0].cpu().numpy()
         warped_densities = spatial_transformer(
             densities,
             transformation=vector_field,
             mode="nearest",
-            default_value=0,
+            default_value=air_material.density,
         )
         warped_densities = warped_densities[0, 0].cpu().numpy()
 
@@ -584,6 +597,173 @@ class MCAirGeometry(MCGeometry):
         super().__init__(
             materials=materials, densities=densities, image_spacing=image_spacing
         )
+
+
+class MCCIRSPhantomGeometry(MCGeometry):
+    @classmethod
+    def from_base_geometry(cls):
+        return cls.load(
+            pkg_resources.resource_filename(
+                "cbctmc", "assets/geometries/base_cirs_geometry.pkl.gz"
+            )
+        )
+
+    @classmethod
+    def from_image(
+        cls,
+        image_filepath: PathLike,
+        segmenter: MCSegmenter | None = None,
+        segmenter_kwargs: dict | None = None,
+        body_segmentation_filepath: PathLike | None = None,
+        bone_segmentation_filepath: PathLike | None = None,
+        muscle_segmentation_filepath: PathLike | None = None,
+        fat_segmentation_filepath: PathLike | None = None,
+        liver_segmentation_filepath: PathLike | None = None,
+        stomach_segmentation_filepath: PathLike | None = None,
+        lung_segmentation_filepath: PathLike | None = None,
+        lung_vessel_segmentation_filepath: PathLike | None = None,
+        image_spacing: FloatTuple3D | None = None,
+    ) -> MCGeometry:
+        image = sitk.ReadImage(str(image_filepath))
+        if image_spacing:
+            logger.info(f"Resampling image to image spacing of {image_spacing}")
+            image = resample_image_spacing(
+                image,
+                new_spacing=image_spacing,
+                resampler=sitk.sitkLinear,
+                default_voxel_value=-1000,
+            )
+
+        image_spacing = image.GetSpacing()
+        image_origin = image.GetOrigin()
+        image_direction = image.GetDirection()
+        # convert to numpy, swap zyx (itk) -> xyz (numpy)
+        image = sitk.GetArrayFromImage(image).swapaxes(0, 2)
+
+        if segmenter:
+            # if a segmenter is given: predict segmentations
+            # set table to water HU
+            image[(image > 200) & (image < 400)] = 0
+
+            segmentation, _ = segmenter.segment(image)
+            segmenter.clear_cache()
+
+            body_segmentation = segmentation[get_label_index("background")] == 0
+            bone_segmentation = segmentation[get_label_index("upper_body_bones")]
+            muscle_segmentation = segmentation[get_label_index("upper_body_muscles")]
+            fat_segmentation = segmentation[get_label_index("upper_body_fat")]
+            liver_segmentation = segmentation[get_label_index("liver")]
+            stomach_segmentation = segmentation[get_label_index("stomach")]
+            lung_segmentation = segmentation[get_label_index("lung")]
+            lung_vessel_segmentation = segmentation[get_label_index("lung_vessels")]
+
+            body_segmentation = (
+                body_segmentation
+                | muscle_segmentation
+                | fat_segmentation
+                | liver_segmentation
+                | stomach_segmentation
+            )
+
+            muscle_segmentation[:] = 0
+            fat_segmentation[:] = 0
+            liver_segmentation[:] = 0
+            stomach_segmentation[:] = 0
+
+        else:
+            body_segmentation = None
+            bone_segmentation = None
+            muscle_segmentation = None
+            fat_segmentation = None
+            liver_segmentation = None
+            stomach_segmentation = None
+            lung_segmentation = None
+            lung_vessel_segmentation = None
+
+        # passed segmentation filepaths overwrite predicted segmentations
+        mapper_pipeline = MaterialMapperPipeline.create_default_pipeline(
+            body_segmentation=body_segmentation_filepath or body_segmentation,
+            bone_segmentation=bone_segmentation_filepath or bone_segmentation,
+            muscle_segmentation=muscle_segmentation_filepath or muscle_segmentation,
+            fat_segmentation=fat_segmentation_filepath or fat_segmentation,
+            liver_segmentation=liver_segmentation_filepath or liver_segmentation,
+            stomach_segmentation=stomach_segmentation_filepath or stomach_segmentation,
+            lung_segmentation=lung_segmentation_filepath or lung_segmentation,
+            lung_vessel_segmentation=lung_vessel_segmentation_filepath
+            or lung_vessel_segmentation,
+        )
+
+        materials, densities = mapper_pipeline.execute(
+            image, image_spacing=image_spacing
+        )
+
+        return cls(
+            materials=materials,
+            densities=densities,
+            image_spacing=image_spacing,
+            image_direction=image_direction,
+            image_origin=image_origin,
+        )
+
+    @staticmethod
+    def create_spherical_mask(
+        radius: float, shape: Tuple[int, int, int], sphere_center: Tuple[int, int, int]
+    ):
+        x = np.arange(0, shape[0])
+        y = np.arange(0, shape[1])
+        z = np.arange(0, shape[2])
+        x, y, z = np.meshgrid(x, y, z, indexing="ij")
+        mask = (x - sphere_center[0]) ** 2 + (y - sphere_center[1]) ** 2 + (
+            z - sphere_center[2]
+        ) ** 2 <= radius**2
+
+        return mask
+
+    @staticmethod
+    def create_cirs_insert(
+        shape: Tuple[int, int, int], insert_center: Tuple[int, int, int]
+    ):
+        radius = 15.0
+        sphere_mask = MCCIRSPhantomGeometry.create_spherical_mask(
+            radius=radius, shape=shape, sphere_center=insert_center
+        )
+
+        insert_center = np.array(insert_center)
+
+        cylinder_center = insert_center + np.array([0, 0, radius / 2])
+        cylinder_radius = 1.5
+        cylinder_height = radius
+        x = np.arange(0, shape[0])
+        y = np.arange(0, shape[1])
+        z = np.arange(0, shape[2])
+        x, y, z = np.meshgrid(x, y, z, indexing="ij")
+        cutout_mask = (
+            (
+                (x - cylinder_center[0]) ** 2 + (y - cylinder_center[1]) ** 2
+                <= cylinder_radius**2
+            )
+            & (z >= cylinder_center[2] - cylinder_height / 2)
+            & (z <= cylinder_center[2] + cylinder_height / 2)
+        )
+        sphere_mask[cutout_mask] = False
+
+        return sphere_mask
+
+    def place_insert(
+        self,
+        shift: Tuple[int, int, int] = (0, 0, 0),
+        insert_center: Tuple[int, int, int] = (238, 141, 71),
+    ) -> MCCIRSPhantomGeometry:
+        insert_center = np.array(insert_center) + np.array(shift)
+        insert_mask = self.create_cirs_insert(
+            shape=self.image_shape, insert_center=insert_center
+        )
+        geometry = self.copy()
+
+        geometry.materials[insert_mask] = MATERIALS_125KEV["soft_tissue"].number
+        geometry.densities[insert_mask] = MATERIALS_125KEV["soft_tissue"].density
+
+        return geometry
 
 
 class CylindricalPhantomMixin:

@@ -17,6 +17,8 @@ from cbctmc.docker import (
     execute_in_docker,
 )
 from cbctmc.logger import LoggerMixin
+from cbctmc.reconstruction.binning import save_curve
+from cbctmc.reconstruction.respiratory import calculate_phase
 from cbctmc.shell import create_cli_command, execute
 from cbctmc.utils import iec61217_to_rsp
 
@@ -115,7 +117,8 @@ class RTKReconstructor(Reconstructor):
 class ROOSTER4DReconstructor(RTKReconstructor):
     def __init__(
         self,
-        phase_signal: Optional[np.ndarray],
+        amplitude_signal: Optional[np.ndarray] | None = None,
+        phase_signal: Optional[np.ndarray] | None = None,
         executable: PathLike = "rtkfourdrooster",
         detector_binning: int = 1,
         use_docker: bool = True,
@@ -127,12 +130,24 @@ class ROOSTER4DReconstructor(RTKReconstructor):
             use_docker=use_docker,
             gpu_id=gpu_id,
         )
+
+        if amplitude_signal is not None and phase_signal is not None:
+            raise ValueError(
+                "Only one of amplitude_signal and phase_signal can be set."
+            )
+
+        self.amplitude_signal = amplitude_signal
         self.phase_signal = phase_signal
 
     def _reconstruct(self, output_filepath: PathLike, **kwargs) -> Path:
+        if self.phase_signal is None:
+            phase_signal = calculate_phase(breathing_curve=self.amplitude_signal)
+        else:
+            phase_signal = self.phase_signal
+
         with TemporaryDirectory() as temp_dir:
             signal_filepath = Path(temp_dir) / "signal.txt"
-            save_curve(self.phase_signal, filepath=signal_filepath)
+            save_curve(phase_signal, filepath=signal_filepath)
 
             kwargs["signal"] = signal_filepath
 

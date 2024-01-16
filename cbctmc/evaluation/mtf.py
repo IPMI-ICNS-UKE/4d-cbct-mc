@@ -1,6 +1,9 @@
 from typing import Sequence, Tuple
 
 import numpy as np
+from scipy import signal
+
+from cbctmc.peaks import find_peaks
 
 
 def michelson_contrast(data: np.ndarray) -> float:
@@ -9,6 +12,8 @@ def michelson_contrast(data: np.ndarray) -> float:
     Ranges from 0 to 1.
     """
     data_min, data_max = data.min(), data.max()
+    if data_min == data_max:
+        return 0.0
     return (data_max - data_min) / (data_max + data_min)
 
 
@@ -25,7 +30,7 @@ def calculate_mtf(
     :param line_pair_minimums: (mean) minimum voxel values of the line pairs
     :return:
     """
-    # sort input by line pair spacing descending
+    # sort input by line pair spacing ascending
     line_pair_spacings, line_pair_maximums, line_pair_minimums = zip(
         *sorted(
             zip(line_pair_spacings, line_pair_maximums, line_pair_minimums),
@@ -54,62 +59,16 @@ def extract_line_pair_profile(
     image: np.ndarray,
     bounding_box: Tuple[slice, slice, slice],
     average_axes: Sequence[int] = (1, 2),
-) -> np.ndarray:
+    min_peak_distance: float | None = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     patch = image[bounding_box]
     profile = patch.mean(axis=average_axes)
 
-    return profile
+    # select profile from first to last peak
+    maxs = find_peaks(profile)
+    profile = profile[maxs[0] : maxs[-1] + 1]
 
+    maxs = find_peaks(profile)
+    mins = find_peaks(-profile)
 
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    import SimpleITK as sitk
-
-    line_pair_spacings = [2, 4, 6, 8]
-    minimums = []
-    maximums = []
-
-    fig, ax = plt.subplots(1, len(line_pair_spacings))
-
-    for i, line_pair_spacing in enumerate(line_pair_spacings):
-        gap = line_pair_spacing // 2
-
-        image = sitk.ReadImage(
-            f"/datalake2/mc_test/lp_{gap}mm/reference/reconstructions/fdk3d_wpc_0.25mm.mha"
-        )
-        image_spacing = image.GetSpacing()
-        if len(set(image_spacing)) > 1:
-            raise ValueError(f"{image_spacing=} is not isotropic")
-
-        image_spacing = image_spacing[0]
-
-        image = sitk.GetArrayFromImage(image)
-        image = np.swapaxes(image, 0, 2)
-
-        pattern_length = int(0.50 * line_pair_spacing / image_spacing * 4)
-        pattern_depth = int(20 / (2 * image_spacing))
-        image_center = (np.array(image.shape) / 2).astype(int)
-
-        bounding_box = np.index_exp[
-            image_center[0]
-            - pattern_length // 2 : image_center[0]
-            + pattern_length // 2,
-            image_center[1] - pattern_depth // 2 : image_center[1] + pattern_depth // 2,
-            image_center[2] - pattern_depth // 2 : image_center[2] + pattern_depth // 2,
-        ]
-
-        profile = extract_line_pair_profile(
-            image, bounding_box=bounding_box, average_axes=(1, 2)
-        )
-        ax[i].plot(profile)
-
-        minimums.append(profile.min())
-        maximums.append(profile.max())
-
-    mtf = calculate_mtf(
-        line_pair_spacings=line_pair_spacings,
-        line_pair_maximums=maximums,
-        line_pair_minimums=minimums,
-    )
-    fig, ax = plt.subplots()
-    ax.plot(1 / np.array(list(mtf.keys())), mtf.values())
+    return profile, maxs, mins

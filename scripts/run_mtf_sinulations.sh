@@ -1,5 +1,6 @@
 #!/bin/bash
 
+run-mc-lp --output-folder /datalake2/mc_mtf_final/lp_0.25gap --gpu 0 --line-gap 0.25 --reference --reconstruct
 run-mc-lp --output-folder /datalake2/mc_mtf_final/lp_0.50gap --gpu 0 --line-gap 0.50 --reference --reconstruct
 run-mc-lp --output-folder /datalake2/mc_mtf_final/lp_0.75gap --gpu 0 --line-gap 0.75 --reference --reconstruct
 run-mc-lp --output-folder /datalake2/mc_mtf_final/lp_1.00gap --gpu 0 --line-gap 1.00 --reference --reconstruct

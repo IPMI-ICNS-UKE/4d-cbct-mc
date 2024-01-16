@@ -7,6 +7,7 @@ from typing import Sequence, Tuple
 import numpy as np
 from scipy.signal import savgol_filter
 
+from cbctmc.common_types import PathLike
 from cbctmc.utils import rescale_range
 
 
@@ -22,9 +23,9 @@ class RespiratorySignal:
         self.dt_signal = (
             dt_signal if dt_signal is not None else self._calculate_time_derivative()
         )
-        self.time = np.linspace(0, self.total_seconds, len(self.signal), endpoint=False)
+        self.time = np.linspace(0, self.total_seconds, len(self.signal))
 
-    def save(self, filepath: str):
+    def save(self, filepath: PathLike):
         with open(filepath, "wb") as f:
             pickle.dump(
                 {
@@ -45,9 +46,9 @@ class RespiratorySignal:
         resampled_time = np.linspace(
             0, self.total_seconds, int(self.total_seconds * sampling_frequency)
         )
+
         signal = np.interp(resampled_time, self.time, self.signal)
         dt_signal = np.interp(resampled_time, self.time, self.dt_signal)
-        sampling_frequency = sampling_frequency
 
         return RespiratorySignal(
             signal=signal, dt_signal=dt_signal, sampling_frequency=sampling_frequency
@@ -106,6 +107,21 @@ class RespiratorySignal:
 
         return cls(signal, sampling_frequency=sampling_frequency)
 
+    @classmethod
+    def create_cos4(
+        cls,
+        total_seconds: float,
+        period: float = 5.0,
+        amplitude: float = 1.0,
+        sampling_frequency: float = 25.0,
+    ):
+        # cos**4 has double the frequency of sin, thus we need to divide by 2
+        frequency = 1 / (2 * period)
+        t = np.linspace(0, total_seconds, int(total_seconds * sampling_frequency))
+        signal = amplitude * np.cos(2 * np.pi * frequency * t) ** 4
+
+        return cls(signal, sampling_frequency=sampling_frequency)
+
     @staticmethod
     def _repeat_signal(
         signal: np.ndarray, sampling_frequency: float, total_seconds: float
@@ -113,6 +129,30 @@ class RespiratorySignal:
         n_repeats = ceil(total_seconds * sampling_frequency / len(signal))
         n_target_samples = int(total_seconds * sampling_frequency)
         return np.tile(signal, n_repeats)[:n_target_samples]
+
+    @classmethod
+    def from_file(
+        cls,
+        filepath: PathLike,
+        sampling_frequency: float | None = None,
+        total_seconds: float | None = None,
+    ):
+        """Load respiratory signal from a text file."""
+        if not any((sampling_frequency, total_seconds)):
+            raise ValueError(
+                "Either sampling_frequency or total_seconds must be given."
+            )
+        if all((sampling_frequency, total_seconds)):
+            raise ValueError(
+                "Only one of sampling_frequency or total_seconds must be given."
+            )
+
+        signal = np.loadtxt(filepath)
+        if total_seconds:
+            # calculate sampling frequency from total_seconds
+            sampling_frequency = len(signal) / total_seconds
+
+        return cls(signal, sampling_frequency=sampling_frequency)
 
     @classmethod
     def from_masks(
@@ -172,7 +212,7 @@ class RespiratorySignal:
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
-    signal = RespiratorySignal.create_sin4(total_seconds=200)
+    signal = RespiratorySignal.create_cos4(total_seconds=60)
     # plt.plot(signal.time, signal.signal)
     # plt.plot(signal.time, signal.dt_signal)
 
@@ -180,7 +220,13 @@ if __name__ == "__main__":
     plt.plot(resampled_signal.time, resampled_signal.signal)
     plt.plot(resampled_signal.time, resampled_signal.dt_signal)
 
-    quantized_signal, quantized_dt_signal = signal.quantize_signal(n_bins=10)
+    n_bins = 20
+    quantized_signal = RespiratorySignal.quantize_signal(
+        signal=signal.signal, n_bins=n_bins
+    )
+    quantized_dt_signal = RespiratorySignal.quantize_signal(
+        signal=signal.dt_signal, n_bins=n_bins
+    )
     print(RespiratorySignal.get_unique_signals(quantized_signal, quantized_dt_signal))
     plt.plot(signal.time, quantized_signal)
     plt.plot(signal.time, quantized_dt_signal)

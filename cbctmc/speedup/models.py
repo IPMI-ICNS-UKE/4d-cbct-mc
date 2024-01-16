@@ -276,6 +276,7 @@ class MCSpeedUpNetSeparated(nn.Module):
         local_feature_fusion_channels: int = 32,
         pre_block_channels: int | None = 32,
         post_block_channels: int | None = 32,
+        mode: str = "unet",
     ):
         super().__init__()
 
@@ -290,28 +291,75 @@ class MCSpeedUpNetSeparated(nn.Module):
         self.pre_block_channels = pre_block_channels
         self.post_block_channels = post_block_channels
 
-        self.mean_net = MCSpeedUpNet(
-            in_channels=in_channels,
-            out_channels=out_channels // 2,
-            growth_rate=growth_rate,
-            n_blocks=n_blocks,
-            n_block_layers=n_block_layers,
-            convolution_block=convolution_block,
-            local_feature_fusion_channels=local_feature_fusion_channels,
-            pre_block_channels=pre_block_channels,
-            post_block_channels=post_block_channels,
-        )
-        self.var_net = MCSpeedUpNet(
-            in_channels=in_channels,
-            out_channels=out_channels // 2,
-            growth_rate=growth_rate,
-            n_blocks=n_blocks,
-            n_block_layers=n_block_layers,
-            convolution_block=convolution_block,
-            local_feature_fusion_channels=local_feature_fusion_channels,
-            pre_block_channels=pre_block_channels,
-            post_block_channels=post_block_channels,
-        )
+        self.var_scale = nn.Parameter(0.001 * torch.ones(1), requires_grad=True)
+
+        if mode == "unet":
+            self.mean_net = FlexUNet(
+                n_channels=in_channels,
+                n_classes=1,
+                n_levels=4,
+                filter_base=32,
+                n_filters=None,
+                convolution_layer=nn.Conv2d,
+                downsampling_layer=nn.MaxPool2d,
+                upsampling_layer=nn.Upsample,
+                norm_layer=nn.InstanceNorm2d,
+                skip_connections=True,
+                convolution_kwargs={
+                    "kernel_size": 3,
+                    "padding": "same",
+                    "bias": True,
+                    "padding_mode": "replicate",
+                },
+                downsampling_kwargs=None,
+                upsampling_kwargs=None,
+                return_bottleneck=False,
+            )
+            self.var_net = FlexUNet(
+                n_channels=in_channels,
+                n_classes=1,
+                n_levels=4,
+                filter_base=32,
+                n_filters=None,
+                convolution_layer=nn.Conv2d,
+                downsampling_layer=nn.MaxPool2d,
+                upsampling_layer=nn.Upsample,
+                norm_layer=nn.InstanceNorm2d,
+                skip_connections=True,
+                convolution_kwargs={
+                    "kernel_size": 3,
+                    "padding": "same",
+                    "bias": True,
+                    "padding_mode": "replicate",
+                },
+                downsampling_kwargs=None,
+                upsampling_kwargs=None,
+                return_bottleneck=False,
+            )
+
+        else:
+            self.mean_net = MCSpeedUpNet(
+                in_channels=in_channels,
+                out_channels=out_channels // 2,
+                growth_rate=growth_rate,
+                n_blocks=n_blocks,
+                n_block_layers=n_block_layers,
+                convolution_block=convolution_block,
+                local_feature_fusion_channels=local_feature_fusion_channels,
+                pre_block_channels=pre_block_channels,
+                post_block_channels=post_block_channels,
+            )
+            self.var_net = MCSpeedUpNet(
+                in_channels=in_channels,
+                out_channels=out_channels // 2,
+                growth_rate=growth_rate,
+                n_blocks=n_blocks,
+                n_block_layers=n_block_layers,
+                convolution_block=convolution_block,
+                local_feature_fusion_channels=local_feature_fusion_channels,
+                pre_block_channels=pre_block_channels,
+                post_block_channels=post_block_channels,
+            )
 
     def freeze_mean_net(self, freeze: bool = True):
         for param in self.mean_net.parameters():
@@ -321,11 +369,82 @@ class MCSpeedUpNetSeparated(nn.Module):
         for param in self.var_net.parameters():
             param.requires_grad = not freeze
 
-    def forward(self, x):
-        mean = self.mean_net(x)
-        var = self.var_net(x)
+    # def forward(self, x):
+    #     mean = self.mean_net(x)
+    #     var = self.var_net(x)
+    #
+    #     return torch.cat((mean, var), dim=1)
 
-        return torch.cat((mean, var), dim=1)
+    def forward(self, x):
+        # x = (low_photon, forward_projection)
+        mean_factor = 10.0
+
+        mean_residual = self.mean_net(x)
+
+        # range (-mean_factor, +mean_factor)
+        mean_residual = mean_factor * torch.tanh(mean_residual)
+        mean = torch.relu(x[:, 0:1] + mean_residual)
+
+        variance = mean * self.var_scale + 1e-6
+
+        return torch.cat((mean, variance), dim=1)
+
+
+class MCSpeedUpUNet(nn.Module):
+    def __init__(
+        self,
+        in_channels: int = 1,
+        out_channels: int = 1,
+    ):
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        self.var_scale = nn.Parameter(0.001 * torch.ones(1))
+
+        self.mean_net = FlexUNet(
+            n_channels=in_channels,
+            n_classes=1,
+            n_levels=4,
+            filter_base=64,
+            n_filters=None,
+            convolution_layer=nn.Conv2d,
+            downsampling_layer=nn.MaxPool2d,
+            upsampling_layer=nn.Upsample,
+            norm_layer=nn.InstanceNorm2d,
+            skip_connections=True,
+            convolution_kwargs={
+                "kernel_size": 3,
+                "padding": "same",
+                "bias": True,
+                "padding_mode": "replicate",
+            },
+            downsampling_kwargs=None,
+            upsampling_kwargs=None,
+            return_bottleneck=False,
+        )
+
+    def freeze_mean_net(self, freeze: bool = True):
+        for param in self.mean_net.parameters():
+            param.requires_grad = not freeze
+
+    def freeze_var_net(self, freeze: bool = True):
+        pass
+
+    def forward(self, x):
+        # x = (low_photon, forward_projection)
+        mean_factor = 10.0
+
+        mean_residual = self.mean_net(x)
+
+        # range (-mean_factor, +mean_factor)
+        mean_residual = mean_factor * torch.tanh(mean_residual)
+        mean = torch.relu(x[:, 0:1] + mean_residual)
+
+        variance = mean * self.var_scale + 1e-6
+
+        return torch.cat((mean, variance), dim=1)
 
 
 class FlexUNet(nn.Module):
@@ -609,9 +728,26 @@ class DenseNet(nn.Module):
 
 
 if __name__ == "__main__":
-    low_photon = torch.ones((1, 1, 512, 384))  # batch_size, n_channels, x_size, y_size
-    high_photon = torch.ones((1, 1, 512, 384))
+    model = FlexUNet(
+        n_channels=2,
+        n_classes=1,
+        n_levels=4,
+        filter_base=64,
+        n_filters=None,
+        convolution_layer=nn.Conv2d,
+        downsampling_layer=nn.MaxPool2d,
+        upsampling_layer=nn.Upsample,
+        norm_layer=nn.InstanceNorm2d,
+        skip_connections=True,
+        convolution_kwargs={
+            "kernel_size": 3,
+            "padding": "same",
+            "bias": True,
+            "padding_mode": "replicate",
+        },
+        downsampling_kwargs=None,
+        upsampling_kwargs=None,
+        return_bottleneck=True,
+    )
 
-    model = ResidualDenseNet2D(in_channels=1, out_channels=2)  # out: mu & sigma
-
-    prediction = model(low_photon)  # torch.Size([1, 2, 512, 384])
+    prediction, bottleneck = model(torch.ones((1, 2, 1024, 768)))

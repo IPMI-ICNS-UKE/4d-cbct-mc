@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
+import time
 from math import ceil
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -12,14 +15,15 @@ from torch.utils.data import DataLoader
 
 from cbctmc.common_types import ArrayOrTensor, PathLike, TorchDevice
 from cbctmc.speedup.dataset import MCSpeedUpDataset
-from cbctmc.speedup.models import FlexUNet
+from cbctmc.speedup.models import FlexUNet, MCSpeedUpUNet
 from cbctmc.speedup.trainer import ForwardPassMixin
+
+logger = logging.getLogger(__name__)
 
 
 class MCSpeedup(ForwardPassMixin):
     def __init__(self, model, device: TorchDevice = "cuda"):
-        model.to(device)
-        self.model = model.eval()
+        self.model = model.to(device)
         self.device = device
 
     def _cast_to_tensor(self, data: ArrayOrTensor) -> torch.Tensor | None:
@@ -34,7 +38,7 @@ class MCSpeedup(ForwardPassMixin):
 
     def _cast_to_numpy(self, data: torch.Tensor) -> np.ndarray:
         # remove color channel
-        return data[:, 0].detach().cpu().numpy()
+        return data.detach().cpu().numpy()
 
     def execute(
         self,
@@ -42,26 +46,25 @@ class MCSpeedup(ForwardPassMixin):
         forward_projection: ArrayOrTensor | None = None,
         batch_size: int = 16,
     ):
-        low_photon = self._cast_to_tensor(low_photon)
-        forward_projection = self._cast_to_tensor(forward_projection)
-
-        mean = torch.zeros_like(low_photon)
-        variance = torch.zeros_like(low_photon)
+        t_start = time.monotonic()
+        mean = torch.zeros(low_photon.shape)
+        variance = torch.zeros(low_photon.shape)
 
         n_batches = ceil(low_photon.shape[0] / batch_size)
         for i_batch in range(n_batches):
             slicing = slice(i_batch * batch_size, (i_batch + 1) * batch_size)
 
+            _low_photon = self._cast_to_tensor(low_photon[slicing])
             if forward_projection is not None:
-                _forward_projection = forward_projection[slicing]
+                _forward_projection = self._cast_to_tensor(forward_projection[slicing])
             else:
                 _forward_projection = forward_projection
 
             _mean, _variance = self.predict(
-                low_photon=low_photon[slicing], forward_projection=_forward_projection
+                low_photon=_low_photon, forward_projection=_forward_projection
             )
-            mean[slicing] = _mean
-            variance[slicing] = _variance
+            mean[slicing] = _mean[:, 0]
+            variance[slicing] = _variance[:, 0]
 
         sample = self.sample(mean=mean, variance=variance)
 
@@ -69,12 +72,43 @@ class MCSpeedup(ForwardPassMixin):
         variance = self._cast_to_numpy(variance)
         sample = self._cast_to_numpy(sample)
 
+        t_end = time.monotonic()
+        computation_time = t_end - t_start
+        logger.info(
+            f"Time for speedup: {computation_time:.2f}s ({computation_time / len(sample):.3f}s per projection)"
+        )
+
+        torch.cuda.empty_cache()
+
         return mean, variance, sample
+
+    @staticmethod
+    def preprocess_inputs(
+        low_photon: torch.Tensor, forward_projection: torch.Tensor | None = None
+    ) -> Tuple[torch.Tensor, torch.Tensor | None]:
+        # normalize forward_projections to the same range as low_photon by matching
+        # the mean and std
+        if forward_projection is not None:
+            forward_projection = forward_projection - torch.mean(
+                forward_projection, dim=(2, 3), keepdim=True
+            )
+            forward_projection = forward_projection / torch.std(
+                forward_projection, dim=(2, 3), keepdim=True
+            )
+            forward_projection = forward_projection * torch.std(
+                low_photon, dim=(2, 3), keepdim=True
+            )
+            forward_projection = forward_projection + torch.mean(
+                low_photon, dim=(2, 3), keepdim=True
+            )
+
+        return low_photon, forward_projection
 
     def predict(
         self, low_photon: torch.Tensor, forward_projection: torch.Tensor | None = None
     ):
-        with torch.inference_mode(), torch.autocast(device_type="cuda", enabled=True):
+        self.model.eval()
+        with torch.inference_mode(), torch.autocast(device_type="cuda", enabled=False):
             logger.debug(
                 f"Predict mean/variance using low photon projection of shape {low_photon.shape}"
             )
@@ -82,7 +116,10 @@ class MCSpeedup(ForwardPassMixin):
             if forward_projection is not None:
                 forward_projection = forward_projection.to(self.device)
 
-            mean, variance = self.forward_pass(
+            low_photon, forward_projection = self.preprocess_inputs(
+                low_photon=low_photon, forward_projection=forward_projection
+            )
+            mean, variance = self.forward_pass_model(
                 low_photon=low_photon, forward_projection=forward_projection
             )
 
@@ -95,31 +132,13 @@ class MCSpeedup(ForwardPassMixin):
     def from_filepath(cls, model_filepath: PathLike, device: TorchDevice = "cuda"):
         state = torch.load(model_filepath, map_location="cuda")
 
-        model = FlexUNet(
-            n_channels=2,
-            n_classes=2,
-            n_levels=6,
-            filter_base=32,
-            n_filters=None,
-            convolution_layer=nn.Conv2d,
-            downsampling_layer=nn.MaxPool2d,
-            upsampling_layer=nn.Upsample,
-            norm_layer=nn.BatchNorm2d,
-            skip_connections=True,
-            convolution_kwargs=None,
-            downsampling_kwargs=None,
-            upsampling_kwargs=None,
-            return_bottleneck=False,
-        )
-
+        model = MCSpeedUpUNet(in_channels=2, out_channels=2)
         model.load_state_dict(state["model"])
 
         return cls(model=model, device=device)
 
 
 if __name__ == "__main__":
-    import logging
-
     import SimpleITK as sitk
 
     init_fancy_logging()

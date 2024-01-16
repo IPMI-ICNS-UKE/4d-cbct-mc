@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import nn
-from vroc.helper import as_registration_to_reference
+from vroc.helper import as_registration_from_reference
 from vroc.models import Unet3d
 from vroc.registration import VrocRegistration
 from vroc.segmentation.segmentation import Segmenter3d
@@ -20,6 +20,8 @@ from cbctmc.segmentation.segmenter import MCSegmenter
 from cbctmc.speedup.models import FlexUNet
 from cbctmc.utils import resample_image_spacing
 
+logger = logging.getLogger(__name__)
+
 
 class CorrespondenceModel:
     def __init__(self):
@@ -30,6 +32,7 @@ class CorrespondenceModel:
         self.mean_vector_field: np.ndarray | None = None
         self.spatial_shape = None
         self.signals: np.ndarray | None = None
+        self.reference_phase: int | None = None
 
     def save(self, filepath: PathLike):
         with open(filepath, "wb") as f:
@@ -37,11 +40,12 @@ class CorrespondenceModel:
                 {
                     "coefficients": self.coefficients,
                     "timesteps": self.timesteps,
-                    "signals": self.signals,
                     "mean_signal": self.mean_signal,
                     "signal_n_dims": self.signal_n_dims,
                     "mean_vector_field": self.mean_vector_field,
                     "spatial_shape": self.spatial_shape,
+                    "signals": self.signals,
+                    "reference_phase": self.reference_phase,
                 },
                 f,
             )
@@ -120,6 +124,7 @@ class CorrespondenceModel:
         self,
         vector_fields: np.ndarray,
         signals: np.ndarray,
+        reference_phase: int = 2,
     ):
         """Fit the correspondence model according to Wilms et al. (2014) using
         multivariate regression solved by ordinary least squares.
@@ -170,6 +175,7 @@ class CorrespondenceModel:
 
         self.coefficients = centered_vector_fields @ centered_signals_pinv
         self.signals = signals
+        self.reference_phase = reference_phase
 
     def predict(self, signal: np.ndarray) -> np.ndarray:
         if not self.is_fitted:
@@ -183,9 +189,10 @@ class CorrespondenceModel:
         # input signal is of shape (signal_n_dims,)
         # reshape to (signal_n_dims, timestamps=1)
         signal = signal[:, None]
+        centered_signal = signal - self.mean_signal
 
         # prediction is of shape (3*x*y*z, 1)
-        prediction = self.mean_vector_field + self.coefficients @ signal
+        prediction = self.mean_vector_field + self.coefficients @ centered_signal
 
         # reshape to (3, x, y, z)
         prediction = prediction.reshape(3, *self.spatial_shape)
@@ -249,6 +256,7 @@ class CorrespondenceModel:
         masks: np.ndarray | None = None,
         timepoints: np.ndarray | None = None,
         device: str = "cuda",
+        reference_phase: int = 2,
     ):
         """Build a default correspondence model using the images, masks and
         signal."""
@@ -283,8 +291,8 @@ class CorrespondenceModel:
 
         vector_fields = []
 
-        for data in as_registration_to_reference(
-            images, masks=masks, reference_index=2
+        for data in as_registration_from_reference(
+            images, masks=masks, reference_index=reference_phase
         ):
             registration_result = registration.register(
                 moving_image=data["moving_image"],
@@ -312,7 +320,11 @@ class CorrespondenceModel:
         vector_fields = np.stack(vector_fields, axis=0)
 
         correspondence_model = cls()
-        correspondence_model.fit(vector_fields=vector_fields, signals=signals)
+        correspondence_model.fit(
+            vector_fields=vector_fields,
+            signals=signals,
+            reference_phase=reference_phase,
+        )
 
         return correspondence_model
 

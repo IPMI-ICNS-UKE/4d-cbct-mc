@@ -30,7 +30,7 @@ from cbctmc.forward_projection import (
     project_forward,
     save_geometry,
 )
-from cbctmc.mc.geometry import MCGeometry
+from cbctmc.mc.geometry import MCCIRSPhantomGeometry, MCGeometry
 from cbctmc.mc.simulation import MCSimulation, MCSimulation4D
 from cbctmc.segmentation.labels import LABELS
 from cbctmc.segmentation.segmenter import MCSegmenter
@@ -48,11 +48,17 @@ faulthandler.enable()
 @click.option(
     "--data-folder",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=None,
 )
 @click.option(
     "--regex",
     type=str,
     default=".*",
+)
+@click.option(
+    "--geometry-filepath",
+    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
+    default=None,
 )
 @click.option(
     "--output-folder",
@@ -127,13 +133,22 @@ faulthandler.enable()
     default=1.0,
 )
 @click.option(
+    "--cirs-phantom",
+    is_flag=True,
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+)
+@click.option(
     "--loglevel",
     type=click.Choice(["debug", "info", "warning", "error", "critical"]),
     default="info",
 )
 def run(
-    data_folder: Path,
-    regex: str,
+    data_folder: Path | None,
+    regex: str | None,
+    geometry_filepath: Path | None,
     output_folder: Path,
     gpu: Sequence[int],
     reference: bool,
@@ -151,6 +166,8 @@ def run(
     respiratory_signal: Path | None,
     respiratory_signal_quantization: int | None,
     respiratory_signal_scaling: float,
+    cirs_phantom: bool,
+    dry_run: bool,
     loglevel: str,
 ):
     # set up logging
@@ -188,10 +205,18 @@ def run(
     if is_4d:
         mc_simulation_class = MCSimulation4D
         logger.info(f"This is a 4D simulation, thus using {mc_simulation_class}")
-        logger.info(f"Load correspondence model: {correspondence_model}")
+        logger.info(f"Load correspondence model from {correspondence_model}")
         correspondence_model = CorrespondenceModel.load(correspondence_model)
-        logger.info(f"Load respiratory signal: {respiratory_signal}")
+        logger.info(f"Load respiratory signal from {respiratory_signal}")
         respiratory_signal = RespiratorySignal.load(respiratory_signal)
+
+        if phases != (correspondence_model.reference_phase,):
+            logger.warning(
+                f"Phases {phases} do not match "
+                f"{correspondence_model.reference_phase=}. Overwrite phases to "
+                f"{[correspondence_model.reference_phase]}"
+            )
+            phases = [correspondence_model.reference_phase]
 
         if respiratory_signal_scaling != 1:
             logger.info(
@@ -242,7 +267,10 @@ def run(
     else:
         segmenter = None
 
-    patients = sorted(get_folders_by_regex(data_folder, regex=regex))
+    if geometry_filepath:
+        patients = [Path(geometry_filepath).parent]
+    else:
+        patients = sorted(get_folders_by_regex(data_folder, regex=regex))
 
     logger.info(
         f"Found {len(patients)} patients using "
@@ -259,7 +287,28 @@ def run(
             )
             simulation_folder.mkdir(parents=True, exist_ok=True)
 
-            image_filepath = patient_folder / f"phase_{phase:02d}.nii"
+            geometry_class = MCCIRSPhantomGeometry if cirs_phantom else MCGeometry
+            geometry = None
+            if geometry_filepath is not None:
+                logger.info(f"Load geometry from {geometry_filepath}")
+                geometry = geometry_class.load(geometry_filepath)
+                geometry.save_material_segmentation(
+                    simulation_folder / "geometry_materials.nii.gz"
+                )
+                geometry.save_density_image(
+                    simulation_folder / "geometry_densities.nii.gz"
+                )
+                geometry.save(simulation_folder / "geometry.pkl.gz")
+            else:
+                possible_extensions = [".nii", ".nii.gz"]
+                for extension in possible_extensions:
+                    image_filepath = patient_folder / f"phase_{phase:02d}{extension}"
+                    if image_filepath.exists():
+                        break
+                else:
+                    raise ValueError(
+                        f"Could not find image for phase {phase} in {patient_folder}"
+                    )
 
             geometry_already_prepared = all(
                 (
@@ -269,6 +318,8 @@ def run(
                 )
             )
 
+            logger.info(f"Geometry already prepared: {geometry_already_prepared}")
+
             if not geometry_already_prepared:
                 if segmenter is None:
                     segmentation_folder = (
@@ -276,11 +327,13 @@ def run(
                     )
                     logger.info("Create geometry using existing segmentations")
                     # use TotalSegmentator segmentations
+
                     if not (patient_folder / "body.nii.gz").exists():
                         merge_upper_body_bone_segmentations(segmentation_folder)
                         merge_upper_body_muscle_segmentations(segmentation_folder)
                         merge_upper_body_fat_segmentations(segmentation_folder)
-                    geometry = MCGeometry.from_image(
+
+                    geometry = geometry_class.from_image(
                         image_filepath=image_filepath,
                         body_segmentation_filepath=segmentation_folder / "body.nii.gz",
                         bone_segmentation_filepath=segmentation_folder
@@ -300,7 +353,7 @@ def run(
                 else:
                     logger.info("Create geometry using segmentator")
                     # use segmetator
-                    geometry = MCGeometry.from_image(
+                    geometry = geometry_class.from_image(
                         image_filepath=image_filepath,
                         segmenter=segmenter,
                         image_spacing=(1.0, 1.0, 1.0),
@@ -314,7 +367,8 @@ def run(
                 )
                 geometry.save(simulation_folder / "geometry.pkl.gz")
             else:
-                geometry = MCGeometry.load(simulation_folder / "geometry.pkl.gz")
+                if geometry is None:
+                    geometry = MCGeometry.load(simulation_folder / "geometry.pkl.gz")
 
             fp_geometry = create_geometry(start_angle=90, n_projections=n_projections)
             save_geometry(fp_geometry, simulation_folder / "geometry.xml")
@@ -358,26 +412,35 @@ def run(
                     clean=not no_clean,
                     gpu_ids=gpu,
                     force_rerun=False,
+                    dry_run=dry_run,
                     **additional_run_kwargs,
                 )
 
-                if reconstruct:
+                if not dry_run and reconstruct:
                     logger.info("Reconstruct simulation")
-                    reconstruct_3d(
-                        projections_filepath=(
-                            simulation_folder
-                            / config_name
-                            / "projections_total_normalized.mha"
-                        ),
-                        geometry_filepath=simulation_folder / "geometry.xml",
-                        output_folder=(
-                            simulation_folder / config_name / "reconstructions"
-                        ),
-                        output_filename="fdk3d_wpc.mha",
-                        dimension=(464, 250, 464),
-                        water_pre_correction=ReconDefaults.wpc_catphan604,
-                        gpu_id=gpu[0],
-                    )
+                    if (
+                        simulation_folder
+                        / config_name
+                        / "reconstructions"
+                        / "fdk3d.mha"
+                    ).exists():
+                        logger.info("Reconstruction already exists, skip")
+                    else:
+                        reconstruct_3d(
+                            projections_filepath=(
+                                simulation_folder
+                                / config_name
+                                / "projections_total_normalized.mha"
+                            ),
+                            geometry_filepath=simulation_folder / "geometry.xml",
+                            output_folder=(
+                                simulation_folder / config_name / "reconstructions"
+                            ),
+                            output_filename="fdk3d_wpc.mha",
+                            dimension=(464, 250, 464),
+                            water_pre_correction=ReconDefaults.wpc_catphan604,
+                            gpu_id=gpu[0],
+                        )
 
 
 if __name__ == "__main__":
@@ -422,4 +485,4 @@ if __name__ == "__main__":
     # )
 
 
-# --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/mc_output/4d --phases 0 --gpu 0 --gpu 1 --gpu 2--regex 024.* --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --segmenter-patch-overlap 0.25 --segmenter-patch-shape 496 496 32 --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl --respiratory-signal-quantization 20 --respiratory-signal-scaling 2 --reconstruct
+# --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d --phases 0 --gpu 0 --gpu 1 --gpu 2 --regex 024.* --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --segmenter-patch-overlap 0.25 --segmenter-patch-shape 496 496 32 --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl --respiratory-signal-quantization 20 --respiratory-signal-scaling 2 --reconstruct

@@ -70,6 +70,7 @@ class BaseMCSimulation:
         output_folder: PathLike,
         n_histories: int = int(5e10),
         gpu_ids: Sequence[int] | int = 0,
+        dry_run: bool = False,
     ):
         logger.info("Run air simulation")
         output_folder = Path(output_folder) / MCSimulation._AIR_SIMULATION_FOLDER
@@ -78,7 +79,7 @@ class BaseMCSimulation:
             geometry=air_geometry, n_histories=n_histories, n_projections=1
         )
         simulation.run_simulation(
-            output_folder, gpu_ids=gpu_ids, run_air_simulation=False
+            output_folder, gpu_ids=gpu_ids, run_air_simulation=False, dry_run=dry_run
         )
 
     @staticmethod
@@ -241,19 +242,14 @@ class BaseMCSimulation:
 
         folder = Path(folder)
         projections = get_projections_from_folder(folder)
-
-        if not projections:
-            # nothing to postprocess
-            return
-
-        if stack_projections:
+        if projections and stack_projections:
             for mode in ("total", "unscattered", "scattered"):
                 projections_itk = projections_to_itk(projections, mode=mode)
                 output_filepath = folder / f"projections_{mode}.mha"
                 logger.info(f"Write projection stack {output_filepath}")
                 sitk.WriteImage(projections_itk, str(output_filepath))
 
-        if air_normalization:
+        if projections and air_normalization:
             air_projection = MCProjection.from_file(
                 folder / MCSimulation._AIR_SIMULATION_FOLDER / "projections_total.mha"
             )
@@ -373,9 +369,10 @@ class MCSimulation(BaseMCSimulation):
         gpu_ids: Sequence[int] | int = 0,
         force_rerun: bool = False,
         force_geometry_recompile: bool = False,
+        dry_run: bool = False,
     ):
-        if run_air_simulation:
-            self.run_air_simulation(output_folder, gpu_ids=gpu_ids)
+        if dry_run:
+            logger.info("Entering dry run mode. Skipping MC simulation.")
 
         # check if already simulated
         if self._already_simulated(output_folder) and not force_rerun:
@@ -384,6 +381,9 @@ class MCSimulation(BaseMCSimulation):
                 f"finished simulation and {force_rerun=}. Skipping."
             )
             return
+
+        if run_air_simulation:
+            self.run_air_simulation(output_folder, gpu_ids=gpu_ids, dry_run=dry_run)
 
         # input_filepath is the filepath of the MCGPU input file inside
         # the docker container
@@ -397,21 +397,21 @@ class MCSimulation(BaseMCSimulation):
         logger.info("Simulation fully prepared")
 
         # run simulation
-        log_output_filepath = output_folder / f"run{output_suffix}.log"
-        self._run_simulation(
-            input_filepath=input_filepath,
-            log_output_filepath=log_output_filepath,
-            gpu_ids=gpu_ids,
-        )
-
-        # simulation finished or stopped
-        self.postprocess_simulation(
-            output_folder,
-            clean=clean,
-            stack_projections=stack_projections,
-            air_normalization=run_air_simulation,
-            air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
-        )
+        if not dry_run:
+            log_output_filepath = output_folder / f"run{output_suffix}.log"
+            self._run_simulation(
+                input_filepath=input_filepath,
+                log_output_filepath=log_output_filepath,
+                gpu_ids=gpu_ids,
+            )
+            # simulation finished or stopped
+            self.postprocess_simulation(
+                output_folder,
+                clean=clean,
+                stack_projections=stack_projections,
+                air_normalization=run_air_simulation,
+                air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
+            )
 
 
 class MCSimulation4D:
@@ -468,6 +468,7 @@ class MCSimulation4D:
         gpu_ids: Sequence[int] | int = 0,
         force_rerun: bool = False,
         force_geometry_recompile: bool = False,
+        dry_run: bool = False,
     ):
         output_folder = Path(output_folder)
         output_folder.mkdir(parents=True, exist_ok=True)
@@ -475,10 +476,21 @@ class MCSimulation4D:
         # then the signal index corresponds to the projection index
         respiratory_signal = respiratory_signal.resample(self.frame_rate)
 
-        # now clip the signal to the number of projections, i.e. signal has the
+        # now clip the signal to the number of projections, i.e. signal has
         # the length of the number of projections (one signal value per projection)
         signal = respiratory_signal.signal[: self.n_projections]
         dt_signal = respiratory_signal.dt_signal[: self.n_projections]
+
+        np.savetxt(
+            output_folder / "signal.txt",
+            np.stack((signal, dt_signal)).T,
+            header=(
+                "original respiratory signal and its derivative\n"
+                f"signal quantization: None\n"
+                "signal dt_signal"
+            ),
+            fmt="%.6f",
+        )
 
         # quantize the signal if requested
         if respiratory_signal_quantization:
@@ -489,17 +501,14 @@ class MCSimulation4D:
                 dt_signal, n_bins=respiratory_signal_quantization
             )
 
-        # save signals to file
-        header = (
-            "quantized respiratory signal and its derivative\n"
-            f"signal quantization: {respiratory_signal_quantization} bins\n"
-            "signal dt_signal"
-        )
-
         np.savetxt(
-            output_folder / "signal.txt",
+            output_folder / "signal_quantized.txt",
             np.stack((signal, dt_signal)).T,
-            header=header,
+            header=(
+                "quantized respiratory signal and its derivative\n"
+                f"signal quantization: {respiratory_signal_quantization} bins\n"
+                "signal dt_signal"
+            ),
             fmt="%.6f",
         )
 
@@ -510,7 +519,7 @@ class MCSimulation4D:
         logger.info(f"Unique signals: {len(unique_signals)}")
 
         # run one air simulation for all following simulations
-        MCSimulation.run_air_simulation(output_folder, gpu_ids=gpu_ids)
+        MCSimulation.run_air_simulation(output_folder, gpu_ids=gpu_ids, dry_run=dry_run)
 
         start_angle = 270.0
         for unique_signal, projection_indices in unique_signals.items():
@@ -555,12 +564,13 @@ class MCSimulation4D:
                 force_rerun=force_rerun,
                 force_geometry_recompile=force_geometry_recompile,
                 output_suffix=f"_{signal:09.6f}_{dt_signal:09.6f}",
+                dry_run=dry_run,
             )
-
-        BaseMCSimulation.postprocess_simulation(
-            output_folder,
-            clean=clean,
-            stack_projections=stack_projections,
-            air_normalization=run_air_simulation,
-            air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
-        )
+        if not dry_run:
+            BaseMCSimulation.postprocess_simulation(
+                output_folder,
+                clean=clean,
+                stack_projections=stack_projections,
+                air_normalization=run_air_simulation,
+                air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
+            )

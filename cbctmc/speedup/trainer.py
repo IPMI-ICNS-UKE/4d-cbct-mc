@@ -13,7 +13,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 import cbctmc.speedup.metrics as metrics
 from cbctmc.speedup import constants
-from cbctmc.speedup.models import MCSpeedUpNetSeparated
+from cbctmc.speedup.models import MCSpeedUpNetSeparated, MCSpeedUpUNet
 
 
 class MCSpeedUpTrainerOld(BaseTrainer):
@@ -261,35 +261,48 @@ class ForwardPassMixin:
         # variance = variance_factor * torch.relu(torch.tanh(variance)) + 1e-6
 
         # mean = mean_factor * torch.sigmoid(mean)
-        variance = variance_factor * torch.sigmoid(variance) + 1e-6
+        # variance = variance_factor * torch.sigmoid(variance) + 1e-6
+        variance = torch.relu(variance) + 1e-6
 
         return mean, variance
 
-    def forward_pass_residual_dependent_variance(
+    # def forward_pass_residual_dependent_variance(
+    #     self, low_photon: torch.Tensor, forward_projection: torch.Tensor
+    # ):
+    #     mean_factor = 10.0
+    #     max_rel_variance_factor = 0.1
+    #
+    #     if forward_projection is not None:
+    #         inputs = torch.concat((low_photon, forward_projection), dim=1)
+    #     else:
+    #         inputs = low_photon
+    #
+    #     mean_residual = self.model.mean_net(inputs)
+    #     # mean_residual, _ = prediction[:, :1], prediction[:, 1:]
+    #
+    #     # range (-mean_factor, +mean_factor)
+    #     mean_residual = mean_factor * torch.tanh(mean_residual)
+    #     mean = torch.relu(low_photon + mean_residual)
+    #
+    #     variance = mean * self.model.var_scale + 1e-6
+    #
+    #     self.log_info(
+    #         f"{self.model.var_scale=}",
+    #         context="FORWARD",
+    #     )
+    #
+    #     return mean, variance
+
+    def forward_pass_model(
         self, low_photon: torch.Tensor, forward_projection: torch.Tensor
     ):
-        mean_factor = 10.0
-
         if forward_projection is not None:
             inputs = torch.concat((low_photon, forward_projection), dim=1)
         else:
             inputs = low_photon
 
         prediction = self.model(inputs)
-
-        mean_residual, variance_factor = prediction[:, :1], prediction[:, 1:]
-
-        # range (-mean_factor, +mean_factor)
-        mean_residual = mean_factor * torch.tanh(mean_residual)
-        mean = torch.relu(low_photon + mean_residual)
-
-        variance_factor = torch.sigmoid(variance_factor)
-        variance = mean * variance_factor + 1e-6
-
-        self.log_info(
-            f"{variance_factor.min()=} {variance_factor.max()=} {variance_factor.mean()=}",
-            context="FORWARD",
-        )
+        mean, variance = prediction[:, :1], prediction[:, 1:]
 
         return mean, variance
 
@@ -319,8 +332,7 @@ class MCSpeedUpTrainer(BaseTrainer, ForwardPassMixin):
         *args,
         scheduler: ExponentialLR = None,
         use_forward_projection: bool = False,
-        n_pretrain_steps: int = 5_000,
-        learn_variance: bool = True,
+        n_pretrain_steps: int | None = 5_000,
         debug: bool = False,
         **kwargs,
     ):
@@ -328,14 +340,13 @@ class MCSpeedUpTrainer(BaseTrainer, ForwardPassMixin):
         self.scheduler = scheduler
         self.use_forward_projection = use_forward_projection
         self.n_pretrain_steps = n_pretrain_steps
-        self.learn_variance = learn_variance
         self.debug = debug
 
         if self.debug:
             self.debug_folder = self.run_folder / "debug" / self.aim_run.hash
             self.debug_folder.mkdir(exist_ok=True, parents=True)
 
-        self.forward_pass = self.forward_pass_residual_dependent_variance
+        self.forward_pass = self.forward_pass_model
 
     METRICS = {
         "gaussian_nll_loss": MetricType.SMALLER_IS_BETTER,
@@ -397,14 +408,25 @@ class MCSpeedUpTrainer(BaseTrainer, ForwardPassMixin):
             forward_projection = None
         high_photon = torch.as_tensor(data["high_photon"], device=self.device)
 
-        is_pre_training = self.i_step < self.n_pretrain_steps
+        pre_training_enabled = self.n_pretrain_steps is not None
+        if pre_training_enabled:
+            is_pre_training = self.i_step < self.n_pretrain_steps
+        else:
+            is_pre_training = False
+        # if self.i_step == self.n_pretrain_steps:
+        #     # reduce learning rate to 1e-5
+        #     self.optimizer.param_groups[0]['lr'] = 1e-5
+
         self.log_info(f"{is_pre_training=}", context="TRAIN")
-        if isinstance(self.model, MCSpeedUpNetSeparated):
-            if is_pre_training:
+        if isinstance(self.model, (MCSpeedUpNetSeparated, MCSpeedUpUNet)):
+            if is_pre_training and pre_training_enabled:
                 self.model.freeze_mean_net(False)
                 self.model.freeze_var_net(True)
-            else:
+            elif not is_pre_training and pre_training_enabled:
                 self.model.freeze_mean_net(True)
+                self.model.freeze_var_net(False)
+            else:
+                self.model.freeze_mean_net(False)
                 self.model.freeze_var_net(False)
 
         with self._handle_gradient(is_training=is_training, autocast=True):
@@ -419,7 +441,7 @@ class MCSpeedUpTrainer(BaseTrainer, ForwardPassMixin):
             psnr_before = metrics.psnr(image=low_photon, reference_image=high_photon)
             psnr_after = metrics.psnr(image=mean, reference_image=high_photon)
 
-            if is_pre_training:
+            if is_pre_training and pre_training_enabled:
                 loss = l1_loss
             else:
                 loss = gaussian_nll_loss
@@ -428,10 +450,9 @@ class MCSpeedUpTrainer(BaseTrainer, ForwardPassMixin):
                 patient_id = int(data["patient_id"][0])
                 phase = int(data["phase"][0])
                 projection = int(data["projection"][0])
+                mode = data["mode"][0]
 
-                plot_id = (
-                    f"{self.i_step:06d}_{patient_id:03d}_{phase:02d}_{projection:03d}"
-                )
+                plot_id = f"{self.i_step:06d}_{patient_id:03d}_{phase:02d}_{mode}_{projection:03d}"
                 self.log_info(f"Save plot {plot_id}", context="PLOT")
 
                 folder = "training" if is_training else "validation"
@@ -455,7 +476,7 @@ class MCSpeedUpTrainer(BaseTrainer, ForwardPassMixin):
                 mean.save(plot_folder / f"{plot_id}_out_mean.png")
 
                 variance = variance[0, 0].detach().cpu().numpy()
-                variance = self._to_image(variance, max_value=0.1, cmap="gray")
+                variance = self._to_image(variance, max_value=0.01, cmap="gray")
                 variance.save(plot_folder / f"{plot_id}_out_variance.png")
 
                 if self.use_forward_projection:
@@ -468,8 +489,8 @@ class MCSpeedUpTrainer(BaseTrainer, ForwardPassMixin):
         if is_training:
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
-
             self.scaler.update()
+
             if self.scheduler:
                 self.scheduler.step()
                 self.log_info(

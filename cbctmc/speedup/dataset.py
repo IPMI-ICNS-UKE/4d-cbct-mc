@@ -155,6 +155,7 @@ class MCSpeedUpDataset(Dataset):
             data.append(
                 {
                     "patient_id": filepath["patient_id"],
+                    "mode": filepath["mode"],
                     "phase": filepath["phase"],
                     "projection": filepath["projection"],
                     "low_photon": low_photon,
@@ -186,14 +187,14 @@ class MCSpeedUpDataset(Dataset):
     def from_folder(
         cls,
         folder: PathLike,
-        mode: str,
+        modes: List[str],
         patient_ids: Sequence[int],
         phases: Sequence[int] = (0,),
         projections: Sequence[int] = range(894),
     ) -> "MCSpeedUpDataset":
         filepaths = MCSpeedUpDataset.fetch_filepaths(
             root_folder=folder,
-            mode=mode,
+            modes=modes,
             patient_ids=patient_ids,
             phases=phases,
             projections=projections,
@@ -210,7 +211,7 @@ class MCSpeedUpDataset(Dataset):
     @staticmethod
     def fetch_filepaths(
         root_folder: PathLike,
-        mode: str,
+        modes: List[str],
         patient_ids: Sequence[int],
         phases: Sequence[int] = (0,),
         projections: Sequence[int] = range(895),
@@ -218,31 +219,33 @@ class MCSpeedUpDataset(Dataset):
         root_folder = Path(root_folder)
         filepaths = []
         for patient_id in patient_ids:
-            for i_phase in phases:
-                for i_projection in projections:
-                    _filepaths = {
-                        "patient_id": patient_id,
-                        "phase": i_phase,
-                        "projection": i_projection,
-                        "low_photon_filepath": root_folder
-                        / f"pat_{patient_id:03d}__phase_{i_phase:02d}__{mode}__proj_{i_projection:03d}.npy",
-                        "forward_projection_filepath": root_folder
-                        / f"pat_{patient_id:03d}__phase_{i_phase:02d}__fp__proj_{i_projection:03d}.npy",
-                        "high_photon_filepath": root_folder
-                        / f"pat_{patient_id:03d}__phase_{i_phase:02d}__reference__proj_{i_projection:03d}.npy",
-                    }
+            for mode in modes:
+                for i_phase in phases:
+                    for i_projection in projections:
+                        _filepaths = {
+                            "patient_id": patient_id,
+                            "phase": i_phase,
+                            "mode": mode,
+                            "projection": i_projection,
+                            "low_photon_filepath": root_folder
+                            / f"pat_{patient_id:03d}__phase_{i_phase:02d}__{mode}__proj_{i_projection:03d}.npy",
+                            "forward_projection_filepath": root_folder
+                            / f"pat_{patient_id:03d}__phase_{i_phase:02d}__fp__proj_{i_projection:03d}.npy",
+                            "high_photon_filepath": root_folder
+                            / f"pat_{patient_id:03d}__phase_{i_phase:02d}__reference__proj_{i_projection:03d}.npy",
+                        }
 
-                    if all(
-                        _filepaths[p].exists()
-                        for p in (
-                            "low_photon_filepath",
-                            "forward_projection_filepath",
-                            "high_photon_filepath",
-                        )
-                    ):
-                        filepaths.append(_filepaths)
-                    else:
-                        logger.warning(f"Skipping {_filepaths}")
+                        if all(
+                            _filepaths[p].exists()
+                            for p in (
+                                "low_photon_filepath",
+                                "forward_projection_filepath",
+                                "high_photon_filepath",
+                            )
+                        ):
+                            filepaths.append(_filepaths)
+                        else:
+                            logger.warning(f"Skipping {_filepaths}")
 
         return filepaths
 

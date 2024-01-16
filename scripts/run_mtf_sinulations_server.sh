@@ -1,5 +1,6 @@
 #!/bin/bash
 
+run-mc-lp --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/mc_mtf_final/lp_0.25gap --gpu 0 --gpu 1 --gpu 2 --line-gap 0.25 --speedups 2.0 --speedups 5.0 --speedups 10.0 --speedups 20.0 --speedups 50.0 --reconstruct
 run-mc-lp --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/mc_mtf_final/lp_0.50gap --gpu 0 --gpu 1 --gpu 2 --line-gap 0.50 --speedups 2.0 --speedups 5.0 --speedups 10.0 --speedups 20.0 --speedups 50.0 --reconstruct
 run-mc-lp --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/mc_mtf_final/lp_0.75gap --gpu 0 --gpu 1 --gpu 2 --line-gap 0.75 --speedups 2.0 --speedups 5.0 --speedups 10.0 --speedups 20.0 --speedups 50.0 --reconstruct
 run-mc-lp --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/mc_mtf_final/lp_1.00gap --gpu 0 --gpu 1 --gpu 2 --line-gap 1.00 --speedups 2.0 --speedups 5.0 --speedups 10.0 --speedups 20.0 --speedups 50.0 --reconstruct
