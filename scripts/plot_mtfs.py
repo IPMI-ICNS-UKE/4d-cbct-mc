@@ -103,7 +103,7 @@ if __name__ == "__main__":
             )
         )
 
-        ax.plot(spatial_frequency, mtf, label=mode)
+        ax.plot(spatial_frequency, mtf, label=mode, marker="x")
 
     ax.set_xlabel("Spatial frequency [lp/mm]")
     ax.set_ylabel("MTF")
