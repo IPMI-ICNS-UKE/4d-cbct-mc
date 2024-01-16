@@ -1,6 +1,5 @@
-import signal
-
 import numpy as np
+from scipy import signal
 
 
 def find_peaks(x: np.ndarray, scale: int = None, debug: bool = False):
