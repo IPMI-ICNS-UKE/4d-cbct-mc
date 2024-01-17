@@ -1,7 +1,7 @@
 import logging
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import click
 from ipmi.common.logger import init_fancy_logging
@@ -34,8 +34,11 @@ from cbctmc.mc.simulation import MCSimulation
 )
 @click.option(
     "--gpu",
+    help="GPU PCI bus ID to use for simulation",
     type=int,
-    default=0,
+    default=(0,),
+    multiple=True,
+    show_default=True,
 )
 @click.option(
     "--phantom-image-spacing",
@@ -92,7 +95,7 @@ from cbctmc.mc.simulation import MCSimulation
 )
 def run(
     output_folder: Path,
-    gpu: int,
+    gpu: Sequence[int],
     phantom_image_spacing: Tuple[float, float, float],
     phantom_shape: Tuple[int, int, int],
     phantom_radius: float,
@@ -179,7 +182,7 @@ def run(
             simulation_folder / config_name,
             run_air_simulation=True,
             clean=True,
-            gpu_ids=[gpu],
+            gpu_ids=gpu,
             force_rerun=False,
         )
 
@@ -195,7 +198,7 @@ def run(
                 spacing=(0.25, 0.25, 0.25),
                 dimension=(300, 150, 300),
                 water_pre_correction=ReconDefaults.wpc_catphan604,
-                gpu_id=gpu,
+                gpu_id=gpu[0],
             )
 
 
