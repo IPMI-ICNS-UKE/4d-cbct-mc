@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import re
@@ -9,6 +11,7 @@ from typing import Sequence, Tuple
 import numpy as np
 import pkg_resources
 import SimpleITK as sitk
+import yaml
 from ipmi.common.logger import tqdm
 from jinja2 import Environment, FileSystemLoader
 from vroc.blocks import SpatialTransformer
@@ -451,6 +454,12 @@ class MCSimulation4D:
         self.source_to_isocenter_distance = source_to_isocenter_distance
         self.random_seed = random_seed
 
+    @staticmethod
+    def _already_simulated(output_folder: PathLike) -> bool:
+        output_folder = Path(output_folder)
+        # check if projections are already present
+        return (output_folder / "projections_total.mha").is_file()
+
     def _warp_geometry(self, signal: float, dt_signal: float) -> MCGeometry:
         logger.debug(f"warp geometry for {signal=} and {dt_signal=}")
         vector_field = self.correspondence_model.predict(np.array([signal, dt_signal]))
@@ -471,6 +480,15 @@ class MCSimulation4D:
         dry_run: bool = False,
     ):
         output_folder = Path(output_folder)
+
+        # check if already simulated
+        if self._already_simulated(output_folder) and not force_rerun:
+            logger.info(
+                f"Output folder {output_folder} already contains a "
+                f"finished simulation and {force_rerun=}. Skipping."
+            )
+            return
+
         output_folder.mkdir(parents=True, exist_ok=True)
         # resample respiratory signal to match frame rate of CBCT scan
         # then the signal index corresponds to the projection index
@@ -521,17 +539,36 @@ class MCSimulation4D:
         # run one air simulation for all following simulations
         MCSimulation.run_air_simulation(output_folder, gpu_ids=gpu_ids, dry_run=dry_run)
 
+        projection_geometries = {}
+
         start_angle = 270.0
         for unique_signal, projection_indices in unique_signals.items():
             # warp the geometry, i.e., materials and densities, according to the
             # correspondence model using the signal and dt_signal
             signal, dt_signal = unique_signal
+
+            unique_signal_hash = hashlib.sha256(
+                np.array([signal, dt_signal], dtype=np.float32).tobytes()
+            ).hexdigest()[:7]
+
+            output_suffix = f"_{unique_signal_hash}"
             warped_geometry = self._warp_geometry(signal, dt_signal)
 
             projection_angles = [
                 start_angle + i_projection * self.angle_between_projections
                 for i_projection in projection_indices
             ]
+
+            # save used signal/projection/geometry combination to text file
+            for projection_angle in projection_angles:
+                projection_geometries[projection_angle] = {
+                    "signal": float(signal),
+                    "dt_signal": float(dt_signal),
+                    "signal_quantization": respiratory_signal_quantization,
+                    "hash": unique_signal_hash,
+                    "geometry_filename": f"geometry{output_suffix}.pkl.gz",
+                }
+
             # temporary bug fix for 0th projection always at 270deg
             # source direction of projection 0 of each simulation is wrong here
             projection_angles = projection_angles[0:1] + projection_angles
@@ -563,9 +600,16 @@ class MCSimulation4D:
                 gpu_ids=gpu_ids,
                 force_rerun=force_rerun,
                 force_geometry_recompile=force_geometry_recompile,
-                output_suffix=f"_{signal:09.6f}_{dt_signal:09.6f}",
+                output_suffix=output_suffix,
                 dry_run=dry_run,
             )
+
+        # save used signal/projection/geometry combination to json file
+        with open(output_folder / "projection_geometries.yaml", "wt") as f:
+            # sort by projection angle
+            projection_geometries = dict(sorted(projection_geometries.items()))
+            yaml.dump(projection_geometries, f)
+
         if not dry_run:
             BaseMCSimulation.postprocess_simulation(
                 output_folder,

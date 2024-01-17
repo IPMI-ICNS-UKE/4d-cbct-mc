@@ -386,7 +386,8 @@ if __name__ == "__main__":
 
     # respiratory_signal.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl")
     #
-    # model = CorrespondenceModel.build_default(
-    #     images=images, masks=masks, timepoints=timepoints
-    # )
+    model = CorrespondenceModel.build_default(
+        images=images, masks=masks, timepoints=timepoints
+    )
+    model.predict(signal=np.array([signal.signal[0], signal.dt_signal[0]]))
     # model.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl")

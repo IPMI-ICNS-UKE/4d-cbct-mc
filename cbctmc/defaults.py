@@ -63,6 +63,10 @@ class DefaultMCSimulationParameters:
     ] = DefaultVarianScanParameters.n_detector_pixels
     # detector_size is given in mm (x, y)
     detector_size: Tuple[float, float] = (717.024, 297.984)
+    # detector_pixel_size is given in mm (x, y)
+    detector_pixel_size: Tuple[
+        float, float
+    ] = DefaultVarianScanParameters.detector_pixel_size
     # lateral displacement along x of the detector in mm
     detector_lateral_displacement: float = (
         DefaultVarianScanParameters.detector_lateral_displacement

@@ -147,9 +147,9 @@ def project_forward(
 def create_geometry(
     n_projections: int,
     start_angle: float = 270.0,
-    source_to_isocenter: float = 1000.0,
-    source_to_detector: float = 1500.0,
-    detector_offset_x: float = -160.0,
+    source_to_isocenter: float = MCDefaults.source_to_isocenter_distance,
+    source_to_detector: float = MCDefaults.source_to_detector_distance,
+    detector_offset_x: float = MCDefaults.detector_lateral_displacement,
     detector_offset_y: float = 0.0,
     arc: float = 360.0,
 ) -> rtk.ThreeDCircularProjectionGeometry:

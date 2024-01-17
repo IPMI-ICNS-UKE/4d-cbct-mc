@@ -86,7 +86,7 @@ class RespiratorySignal:
         unique_samples_dict = {}
         for unique_sample in unique_samples:
             # add unique sample to dict with all indices where it occurs
-            unique_samples_dict[tuple(unique_sample)] = np.where(
+            unique_samples_dict[tuple(unique_sample.tolist())] = np.where(
                 (samples == unique_sample).all(axis=1)
             )[0].tolist()
 
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     plt.plot(resampled_signal.time, resampled_signal.signal)
     plt.plot(resampled_signal.time, resampled_signal.dt_signal)
 
-    n_bins = 20
+    n_bins = 40
     quantized_signal = RespiratorySignal.quantize_signal(
         signal=signal.signal, n_bins=n_bins
     )

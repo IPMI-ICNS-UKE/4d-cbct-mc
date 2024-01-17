@@ -57,21 +57,21 @@ if __name__ == "__main__":
 
             bounding_box = np.index_exp[
                 image_center[0]
-                - pattern_depth // 2 : image_center[0]
-                + pattern_depth // 2,
+                - pattern_length // 2 : image_center[0]
+                + pattern_length // 2,
                 image_center[1]
                 - pattern_depth // 2 : image_center[1]
                 + pattern_depth // 2,
                 image_center[2]
-                - pattern_length // 2 : image_center[2]
-                + pattern_length // 2,
+                - pattern_depth // 2 : image_center[2]
+                + pattern_depth // 2,
             ]
 
             try:
                 profile, max_indices, min_indices = extract_line_pair_profile(
                     image,
                     bounding_box=bounding_box,
-                    average_axes=(0, 1),
+                    average_axes=(1, 2),
                     min_peak_distance=line_pair_spacing / image_spacing,
                 )
                 # ax[i].plot(profile)

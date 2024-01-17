@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
 from typing import List, Sequence, Tuple
 
 import click
+import numpy as np
+import SimpleITK
 import torch
+import yaml
 from ipmi.common.logger import init_fancy_logging
 from torch import nn
 
@@ -399,6 +403,8 @@ def run(
                 density_forward_projection = project_forward(
                     image,
                     geometry=fp_geometry,
+                    detector_size=MCDefaults.n_detector_pixels_half_fan,
+                    detector_pixel_spacing=MCDefaults.detector_pixel_size,
                 )
                 itk.imwrite(
                     density_forward_projection,
@@ -428,6 +434,70 @@ def run(
                     dry_run=dry_run,
                     **additional_run_kwargs,
                 )
+
+                if not dry_run and is_4d and forward_projection:
+                    logger.info("Perform 4D forward projection")
+
+                    with open(
+                        simulation_folder / config_name / "projection_geometries.yaml",
+                        "rt",
+                    ) as f:
+                        logger.info("Load used projection geometries")
+                        projection_geometries = yaml.safe_load(f)
+                    forward_projections = []
+                    for projection_angle, meta in projection_geometries.items():
+                        # perform 4D forward projection using warped geometries
+                        fp_geometry = create_geometry(
+                            start_angle=projection_angle - 180.0, n_projections=1
+                        )
+
+                        logger.debug(
+                            "Perform 4D forward projection for angle "
+                            f"{projection_angle} and "
+                            f"geometry {meta['geometry_filename']}"
+                        )
+                        geometry = geometry_class.load(
+                            simulation_folder / config_name / meta["geometry_filename"]
+                        )
+                        image = prepare_image_for_rtk(
+                            image=geometry.densities,
+                            image_spacing=geometry.image_spacing,
+                            input_value_range=None,
+                            output_value_range=None,
+                        )
+                        density_forward_projection = project_forward(
+                            image,
+                            geometry=fp_geometry,
+                        )
+                        density_forward_projection = itk.array_from_image(
+                            density_forward_projection
+                        )
+                        forward_projections.append(density_forward_projection[0])
+
+                    forward_projections = np.stack(forward_projections, axis=0)
+                    forward_projections = itk.image_from_array(forward_projections)
+                    forward_projections.SetSpacing(
+                        [
+                            MCDefaults.detector_pixel_size[0],
+                            MCDefaults.detector_pixel_size[1],
+                            1.0,
+                        ]
+                    )
+                    forward_projections.SetOrigin(
+                        [
+                            -0.5
+                            * MCDefaults.n_detector_pixels_half_fan[0]
+                            * MCDefaults.detector_pixel_size[0],
+                            -0.5
+                            * MCDefaults.n_detector_pixels_half_fan[1]
+                            * MCDefaults.detector_pixel_size[1],
+                            0.0,
+                        ]
+                    )
+                    itk.imwrite(
+                        forward_projections,
+                        str(simulation_folder / config_name / "density_fp_4d.mha"),
+                    )
 
                 if not dry_run and reconstruct:
                     logger.info("Reconstruct simulation")
