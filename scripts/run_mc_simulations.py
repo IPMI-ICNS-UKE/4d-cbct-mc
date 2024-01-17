@@ -150,6 +150,11 @@ faulthandler.enable()
     is_flag=True,
 )
 @click.option(
+    "--random-seed",
+    type=int,
+    default=42,
+)
+@click.option(
     "--loglevel",
     type=click.Choice(["debug", "info", "warning", "error", "critical"]),
     default="info",
@@ -178,6 +183,7 @@ def run(
     cirs_phantom: bool,
     catphan_phantom: bool,
     dry_run: bool,
+    random_seed: int,
     loglevel: str,
 ):
     # set up logging
@@ -193,6 +199,7 @@ def run(
             "n_histories": reference_n_histories,
             "n_projections": n_projections,
             "angle_between_projections": 360.0 / n_projections,
+            "random_seed": random_seed,
         }
     CONFIGS.update(
         {
@@ -200,6 +207,7 @@ def run(
                 "n_histories": int(MCDefaults.n_histories / s),
                 "n_projections": n_projections,
                 "angle_between_projections": 360.0 / n_projections,
+                "random_seed": random_seed,
             }
             for s in speedups
         }
