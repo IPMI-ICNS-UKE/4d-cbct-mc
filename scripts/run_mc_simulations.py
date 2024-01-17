@@ -28,6 +28,7 @@ import itk
 
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
+from cbctmc.defaults import DefaultVarianScanParameters as VarianDefaults
 from cbctmc.forward_projection import (
     create_geometry,
     prepare_image_for_rtk,
@@ -468,6 +469,8 @@ def run(
                         density_forward_projection = project_forward(
                             image,
                             geometry=fp_geometry,
+                            detector_size=MCDefaults.n_detector_pixels_half_fan,
+                            detector_pixel_spacing=VarianDefaults.detector_pixel_size,
                         )
                         density_forward_projection = itk.array_from_image(
                             density_forward_projection
