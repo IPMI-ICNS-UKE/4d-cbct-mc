@@ -12,7 +12,7 @@ from cbctmc.mc.respiratory import RespiratorySignal
 from cbctmc.registration.correspondence import CorrespondenceModel
 
 if __name__ == "__main__":
-    output_folder = Path("/data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs")
+    output_folder = Path("/data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs_large")
     geometry = MCCIRSPhantomGeometry.from_base_geometry()
 
     DEVICE = "cuda:0"
@@ -42,6 +42,8 @@ if __name__ == "__main__":
     for i_phase, shift in enumerate(signal_phases.signal):
         shift -= 10
         geometry_with_insert = geometry.place_insert(shift=(0, 0, -shift))
+
+        geometry_with_insert = geometry_with_insert.pad_to_shape((500, 500, 300))
         geometry_with_insert.save_material_segmentation(
             output_folder / f"cirs_phase_{i_phase:02d}.nii.gz"
         )

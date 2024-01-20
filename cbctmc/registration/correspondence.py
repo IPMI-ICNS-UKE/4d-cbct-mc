@@ -257,6 +257,7 @@ class CorrespondenceModel:
         timepoints: np.ndarray | None = None,
         device: str = "cuda",
         reference_phase: int = 2,
+        masked_registration: bool = True,
     ):
         """Build a default correspondence model using the images, masks and
         signal."""
@@ -297,8 +298,8 @@ class CorrespondenceModel:
             registration_result = registration.register(
                 moving_image=data["moving_image"],
                 fixed_image=data["fixed_image"],
-                moving_mask=data["moving_mask"],
-                fixed_mask=data["fixed_mask"],
+                moving_mask=data["moving_mask"] if masked_registration else None,
+                fixed_mask=data["fixed_mask"] if masked_registration else None,
                 register_affine=False,
                 default_parameters={
                     "iterations": 800,
@@ -384,10 +385,13 @@ if __name__ == "__main__":
     plt.plot(signal.time, signal.dt_signal)
     # plt.scatter(timepoints, signal_timepoints)
 
-    # respiratory_signal.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl")
-    #
+    signal.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl")
+
     model = CorrespondenceModel.build_default(
-        images=images, masks=masks, timepoints=timepoints
+        images=images,
+        masks=masks,
+        timepoints=timepoints,
+        masked_registration=False,
+        device="cuda:0",
     )
-    model.predict(signal=np.array([signal.signal[0], signal.dt_signal[0]]))
-    # model.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl")
+    model.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model_nonmasked.pkl")

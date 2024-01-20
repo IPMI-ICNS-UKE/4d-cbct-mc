@@ -153,6 +153,7 @@ if __name__ == "__main__":
         shape=geometry.image_shape,
         insert_center=(238, 141, 71),
     )
+    geometry_with_insert = geometry.copy()
 
     geometry.save(output_folder / "base_geometry.pkl.gz")
     geometry.save_material_segmentation(
@@ -160,11 +161,11 @@ if __name__ == "__main__":
     )
     geometry.save_density_image(output_folder / "base_geometry_densities.nii.gz")
 
-    geometry_with_insert = geometry.copy()
     geometry_with_insert.materials[cirs_insert] = MATERIALS_125KEV["soft_tissue"].number
     geometry_with_insert.densities[cirs_insert] = MATERIALS_125KEV[
         "soft_tissue"
     ].density
+
     geometry_with_insert.save_material_segmentation(
         output_folder / "geometry_with_insert_materials.nii.gz"
     )

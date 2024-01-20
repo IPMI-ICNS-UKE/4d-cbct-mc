@@ -414,8 +414,8 @@ class MCSpeedUpTrainer(BaseTrainer, ForwardPassMixin):
         else:
             is_pre_training = False
         if self.i_step == self.n_pretrain_steps:
-            # reduce learning rate to 1e-5
-            self.optimizer.param_groups[0]["lr"] = 1e-5
+            # set learning rate to 1e-3
+            self.optimizer.param_groups[0]["lr"] = 1e-3
 
         self.log_info(f"{is_pre_training=}", context="TRAIN")
         if isinstance(self.model, (MCSpeedUpNetSeparated, MCSpeedUpUNet)):

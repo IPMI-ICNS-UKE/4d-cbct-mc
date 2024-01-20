@@ -43,29 +43,23 @@ if __name__ == "__main__":
     logger.setLevel(logging.DEBUG)
     logging.getLogger("cbctmc").setLevel(logging.DEBUG)
 
-    DATA_FOLDER = "/datalake3/speedup_dataset"
-    RUN_FOLDER = "/datalake3/speedup_runs"
-
     SPEEDUP_MODES = [
-        # "speedup_2.00x",
-        # "speedup_5.00x",
         # "speedup_10.00x",
         # "speedup_20.00x",
         "speedup_50.00x",
     ]
 
-    MODELS = {
-        # "speedup_2.00x": "/datalake3/speedup_runs_speedup_2.00x/2024-01-14T22:26:49.468697_run_7ae9ad896cd64e829fb5a2e1/models/validation/step_20000.pth",
-        # "speedup_5.00x": "/datalake3/speedup_runs_speedup_5.00x/2024-01-15T03:54:22.889148_run_e8fe55c6308d4a17abe8e358/models/validation/step_20000.pth",
-        #
-        # "speedup_10.00x": "/datalake3/speedup_runs_speedup_5.00x/2024-01-15T03:54:22.889148_run_e8fe55c6308d4a17abe8e358/models/validation/step_20000.pth",
-        # "speedup_20.00x": "/datalake3/speedup_runs_speedup_5.00x/2024-01-15T03:54:22.889148_run_e8fe55c6308d4a17abe8e358/models/validation/step_20000.pth",
-        "speedup_50.00x": "/datalake3/speedup_runs_speedup_5.00x/2024-01-15T03:54:22.889148_run_e8fe55c6308d4a17abe8e358/models/validation/step_20000.pth",
-    }
+    # mean model + var model more training (works)
+    MODEL = "/datalake3/speedup_runs_all_speedups/2024-01-17T18:17:39.555467_run_f28354c2c6484ce5a7b5a783/models/training/step_20000.pth"
 
     USE_FORWARD_PROJECTION = True
     GPU_ID = 1
     DEVICE = f"cuda:{GPU_ID}"
+
+    speedup = MCSpeedup.from_filepath(
+        model_filepath=MODEL,
+        device=DEVICE,
+    )
 
     patient_ids = [
         22,
@@ -96,21 +90,22 @@ if __name__ == "__main__":
     test_patients = sorted(test_patients)
     logger.info(f"Test patients ({len(test_patients)}): {test_patients}")
 
-    test_patients = [91]
+    test_patients = [24]
 
     metrics = {}
     for speedup_mode in SPEEDUP_MODES:
         metrics[speedup_mode] = {}
-        speedup = MCSpeedup.from_filepath(
-            model_filepath=MODELS[speedup_mode],
-            device=DEVICE,
-        )
 
         for patient in test_patients:
             logger.info(f"{patient=}, {speedup_mode=}")
             patient_folder = Path(
-                f"/datalake3/nas_io/anarchy/4d_cbct_mc/speedup/{patient:03d}_4DCT_Lunge_amplitudebased_complete/phase_00"
+                f"/mnt/nas_io/anarchy/4d_cbct_mc/speedup/{patient:03d}_4DCT_Lunge_amplitudebased_complete/phase_00"
             )
+
+            patient_folder = Path(
+                f"/datalake_fast/mc_output/4d_cirs_20_bins/4d_cirs/phase_02"
+            )
+
             # load projections
             low_photon_projections_filepath = (
                 patient_folder / f"{speedup_mode}/projections_total_normalized.mha"
@@ -132,7 +127,14 @@ if __name__ == "__main__":
             high_photon_projections = sitk.ReadImage(
                 str(high_photon_projections_filepath)
             )
-            forward_projection_filepath = patient_folder / f"density_fp.mha"
+
+            if not (
+                forward_projection_filepath := patient_folder
+                / speedup_mode
+                / f"density_fp_4d.mha"
+            ).exists():
+                forward_projection_filepath = patient_folder / f"density_fp.mha"
+
             logger.info(f"Load forward projection from {forward_projection_filepath}")
             forward_projection = sitk.ReadImage(str(forward_projection_filepath))
 
@@ -147,7 +149,7 @@ if __name__ == "__main__":
             ) = speedup.execute(
                 low_photon=low_photon_projections,
                 forward_projection=forward_projection,
-                batch_size=8,
+                batch_size=1,
             )
 
             metrics[speedup_mode][patient] = calculate_metrics(

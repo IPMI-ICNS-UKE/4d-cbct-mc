@@ -338,6 +338,42 @@ class MCGeometry:
         self.image_direction = image_direction
         self.image_origin = image_origin
 
+    def pad_to_shape(self, target_shape: Tuple[int, int, int]) -> MCGeometry:
+        if self.image_shape == target_shape:
+            return self
+
+        # evenly pad left and right
+        padding = []
+        for sh, target_sh in zip(self.image_shape, target_shape):
+            if sh < target_sh:
+                padding_left = (target_sh - sh) // 2
+                padding_right = target_sh - sh - padding_left
+                padding.append((padding_left, padding_right))
+            else:
+                padding.append((0, 0))
+
+        materials = np.pad(
+            self.materials,
+            padding,
+            mode="constant",
+            constant_values=MATERIALS_125KEV["air"].number,
+        )
+        densities = np.pad(
+            self.densities,
+            padding,
+            mode="constant",
+            constant_values=MATERIALS_125KEV["air"].density,
+        )
+
+        return MCGeometry(
+            materials=materials,
+            densities=densities,
+            mus=self.mus,
+            image_spacing=self.image_spacing,
+            image_direction=self.image_direction,
+            image_origin=self.image_origin,
+        )
+
     def copy(self):
         return self.__class__(
             materials=self.materials.copy(),

@@ -425,6 +425,28 @@ class MCSpeedUpUNet(nn.Module):
             return_bottleneck=False,
         )
 
+        self.var_net = FlexUNet(
+            n_channels=1,
+            n_classes=1,
+            n_levels=2,
+            filter_base=16,
+            n_filters=None,
+            convolution_layer=nn.Conv2d,
+            downsampling_layer=nn.MaxPool2d,
+            upsampling_layer=nn.Upsample,
+            norm_layer=nn.InstanceNorm2d,
+            skip_connections=True,
+            convolution_kwargs={
+                "kernel_size": 3,
+                "padding": "same",
+                "bias": True,
+                "padding_mode": "replicate",
+            },
+            downsampling_kwargs=None,
+            upsampling_kwargs=None,
+            return_bottleneck=False,
+        )
+
     def freeze_mean_net(self, freeze: bool = True):
         for param in self.mean_net.parameters():
             param.requires_grad = not freeze
@@ -442,7 +464,11 @@ class MCSpeedUpUNet(nn.Module):
         mean_residual = mean_factor * torch.tanh(mean_residual)
         mean = torch.relu(x[:, 0:1] + mean_residual)
 
-        variance = mean * self.var_scale + 1e-6
+        # variance = mean * self.var_scale + 1e-6
+
+        var_scale = torch.sigmoid(self.var_net(mean)) * 0.10
+        print("mean var_scale: ", var_scale.mean().item())
+        variance = mean * var_scale + 1e-6
 
         return torch.cat((mean, variance), dim=1)
 

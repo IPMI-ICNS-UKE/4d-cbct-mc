@@ -86,11 +86,11 @@ if __name__ == "__main__":
     )
 
     train_data_loader = DataLoader(
-        train_dataset, batch_size=6, shuffle=True, num_workers=4
+        train_dataset, batch_size=10, shuffle=True, num_workers=0
     )
 
     test_data_loader = DataLoader(
-        test_dataset, batch_size=6, shuffle=False, num_workers=0
+        test_dataset, batch_size=10, shuffle=False, num_workers=0
     )
 
     model = MCSpeedUpUNet(
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     )
     model.load_state_dict(state["model"], strict=False)
 
-    optimizer = Adam(params=model.parameters(), lr=1e-4)
+    optimizer = Adam(params=model.parameters(), lr=1e-3)
     scheduler = ExponentialLR(optimizer, gamma=0.99999)
     trainer = MCSpeedUpTrainer(
         model=model,
@@ -111,11 +111,11 @@ if __name__ == "__main__":
         train_loader=train_data_loader,
         val_loader=test_data_loader,
         run_folder=f"{RUN_FOLDER}_all_speedups",
-        experiment_name=f"mc_speedup_unet_all_speedups",
+        experiment_name=f"mc_speedup_unet_all_speedups_var_net",
         device=DEVICE,
         scheduler=scheduler,
         use_forward_projection=USE_FORWARD_PROJECTION,
-        n_pretrain_steps=10_000,
+        n_pretrain_steps=0,
         debug=True,
     )
 
@@ -129,4 +129,4 @@ if __name__ == "__main__":
         }
     )
 
-    trainer.run(steps=10_000_000, validation_interval=10_000, save_interval=1_000)
+    trainer.run(steps=10_000_000, validation_interval=0, save_interval=1_000)

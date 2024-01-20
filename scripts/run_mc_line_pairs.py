@@ -49,7 +49,7 @@ from cbctmc.mc.simulation import MCSimulation
 @click.option(
     "--phantom-shape",
     type=click.Tuple([int, int, int]),
-    default=(250, 250, 125),
+    default=(500, 500, 300),
     help="Image shape of the MC phantom",
 )
 @click.option(

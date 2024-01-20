@@ -37,7 +37,6 @@ class MCSpeedup(ForwardPassMixin):
         return torch.as_tensor(data, device=self.device, dtype=torch.float32)
 
     def _cast_to_numpy(self, data: torch.Tensor) -> np.ndarray:
-        # remove color channel
         return data.detach().cpu().numpy()
 
     def execute(

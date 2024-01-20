@@ -235,6 +235,7 @@ class BaseMCSimulation:
         air_normalization: bool = True,
         air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
     ):
+        logger.info("Start simulation postprocessing")
         if air_normalization and not stack_projections:
             raise ValueError(
                 "Cannot perform air normalization without stacking projections"
@@ -465,6 +466,15 @@ class MCSimulation4D:
         vector_field = self.correspondence_model.predict(np.array([signal, dt_signal]))
         return self.geometry.warp(vector_field=vector_field, device="cpu")
 
+    def _warp_and_save_geometry(
+        self,
+        signals: np.ndarray,
+        dt_signals: np.ndarray,
+        output_folder: PathLike,
+        n_workers: int = 1,
+    ):
+        pass
+
     def run_simulation(
         self,
         respiratory_signal: RespiratorySignal,
@@ -542,6 +552,12 @@ class MCSimulation4D:
         projection_geometries = {}
 
         start_angle = 270.0
+        overall_progress = tqdm(
+            desc="Simulating 4D MC projections",
+            total=self.n_projections,
+            logger=logger,
+            log_level=logging.INFO,
+        )
         for unique_signal, projection_indices in unique_signals.items():
             # warp the geometry, i.e., materials and densities, according to the
             # correspondence model using the signal and dt_signal
@@ -603,6 +619,9 @@ class MCSimulation4D:
                 output_suffix=output_suffix,
                 dry_run=dry_run,
             )
+
+            # TODO: remove -1 due to fix (see above)
+            overall_progress.update(len(projection_angles) - 1)
 
         # save used signal/projection/geometry combination to json file
         with open(output_folder / "projection_geometries.yaml", "wt") as f:

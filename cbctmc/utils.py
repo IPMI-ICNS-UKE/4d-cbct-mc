@@ -75,10 +75,12 @@ def rescale_range(
 
 def resample_image_spacing(
     image: sitk.Image,
-    new_spacing: Tuple[float, float, float],
+    new_spacing: Tuple[float, float, float] | None,
     resampler=sitk.sitkLinear,
     default_voxel_value=0.0,
 ):
+    if new_spacing is None:
+        return image
     original_spacing = image.GetSpacing()
     original_size = image.GetSize()
     new_size = [
