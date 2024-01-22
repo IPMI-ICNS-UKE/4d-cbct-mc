@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from itertools import product
 from pathlib import Path
 from typing import List, Sequence, Tuple
 
@@ -15,7 +16,7 @@ from ipmi.common.logger import init_fancy_logging
 from torch import nn
 
 from cbctmc.mc.respiratory import RespiratorySignal
-from cbctmc.reconstruction.reconstruction import reconstruct_3d
+from cbctmc.reconstruction.reconstruction import reconstruct_3d, reconstruct_4d
 from cbctmc.registration.correspondence import CorrespondenceModel
 from cbctmc.utils import get_asset_filepath, get_folders_by_regex
 
@@ -327,8 +328,14 @@ def run(
                 geometry.save(simulation_folder / "geometry.pkl.gz")
             else:
                 possible_extensions = [".nii", ".nii.gz"]
-                for extension in possible_extensions:
-                    image_filepath = patient_folder / f"phase_{phase:02d}{extension}"
+                possible_image_names = ["bin", "phase"]
+
+                for extension, image_name in product(
+                    possible_extensions, possible_image_names
+                ):
+                    image_filepath = (
+                        patient_folder / f"{image_name}_{phase:02d}{extension}"
+                    )
                     if image_filepath.exists():
                         break
                 else:
@@ -531,6 +538,29 @@ def run(
                                 simulation_folder / config_name / "reconstructions"
                             ),
                             output_filename="fdk3d_wpc.mha",
+                            dimension=(464, 250, 464),
+                            water_pre_correction=ReconDefaults.wpc_catphan604,
+                            gpu_id=gpu[0],
+                        )
+
+                    if is_4d:
+                        logger.info("Reconstruct 4D simulation")
+
+                        signal = np.loadtxt(
+                            simulation_folder / config_name / "signal.txt"
+                        )
+                        reconstruct_4d(
+                            amplitude_signal=signal[:, 0],
+                            projections_filepath=(
+                                simulation_folder
+                                / config_name
+                                / "projections_total_normalized.mha"
+                            ),
+                            geometry_filepath=patient_folder / "geometry.xml",
+                            output_folder=(
+                                simulation_folder / config_name / "reconstructions"
+                            ),
+                            output_filename="rooster4d_wpc_speedup.mha",
                             dimension=(464, 250, 464),
                             water_pre_correction=ReconDefaults.wpc_catphan604,
                             gpu_id=gpu[0],

@@ -142,8 +142,13 @@ class ROOSTER4DReconstructor(RTKReconstructor):
     def _reconstruct(self, output_filepath: PathLike, **kwargs) -> Path:
         if self.phase_signal is None:
             phase_signal = calculate_phase(breathing_curve=self.amplitude_signal)
+            phase_signal = np.hstack(phase_signal)
         else:
             phase_signal = self.phase_signal
+
+        # scale phase signal to [0, 1] as requested by RTK
+        phase_signal -= phase_signal.min()
+        phase_signal /= phase_signal.max()
 
         with TemporaryDirectory() as temp_dir:
             signal_filepath = Path(temp_dir) / "signal.txt"

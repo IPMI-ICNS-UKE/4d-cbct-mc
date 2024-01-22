@@ -21,16 +21,16 @@ if __name__ == "__main__":
     logging.getLogger("cbctmc").setLevel(logging.DEBUG)
 
     SPEEDUP_MODES = [
-        "speedup_10.00x",
+        # "speedup_10.00x",
         # "speedup_20.00x",
-        # "speedup_50.00x",
+        "speedup_50.00x",
     ]
 
     # mean model + var model more training (works)
     MODEL = "/datalake3/speedup_runs_all_speedups/2024-01-17T18:17:39.555467_run_f28354c2c6484ce5a7b5a783/models/training/step_40000.pth"
 
     USE_FORWARD_PROJECTION = True
-    GPU_ID = 0
+    GPU_ID = 1
     DEVICE = f"cuda:{GPU_ID}"
 
     speedup = MCSpeedup.from_filepath(
@@ -39,13 +39,13 @@ if __name__ == "__main__":
     )
 
     gaps = [0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.50, 4.00]
-    gaps = [1.00]
+    gaps = [4.00]
 
     for speedup_mode in SPEEDUP_MODES:
         for gap in gaps:
             logger.info(f"{gap=}, {speedup_mode=}")
             folder = Path(
-                f"/mnt/nas_io/anarchy/4d_cbct_mc/mc_mtf_final/lp_{gap:.2f}gap"
+                f"/mnt/nas_io/anarchy/4d_cbct_mc/mc_mtf_final/lp_{gap:.2f}gap_large"
             )
 
             # load projections
@@ -57,6 +57,9 @@ if __name__ == "__main__":
             direction = low_photon_projections.GetDirection()
 
             forward_projection = sitk.ReadImage(str(folder / f"density_fp.mha"))
+            # forward_projection = sitk.ReadImage(
+            #     str(folder / f"reference/projections_total_normalized.mha")
+            # )
             low_photon_projections = sitk.GetArrayFromImage(low_photon_projections)
             forward_projection = sitk.GetArrayFromImage(forward_projection)
 

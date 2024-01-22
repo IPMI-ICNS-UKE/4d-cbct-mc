@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 import click
+import numpy as np
 import yaml
 
 from cbctmc.common_types import PathLike
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 from cbctmc.logger import init_fancy_logging
-from cbctmc.reconstruction.reconstructors import FDKReconstructor
+from cbctmc.reconstruction.reconstructors import (
+    FDKReconstructor,
+    ROOSTER4DReconstructor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +67,62 @@ def reconstruct_3d(
 
     with open((output_folder / output_filename).with_suffix(".yaml"), "w") as f:
         yaml.dump(fdk_params, f)
+
+
+def reconstruct_4d(
+    projections_filepath: PathLike,
+    geometry_filepath: PathLike,
+    output_folder: PathLike | None = None,
+    output_filename: str | None = None,
+    dimension: Tuple[int, int, int] = (464, 250, 464),
+    spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    amplitude_signal: Optional[np.ndarray] | None = None,
+    phase_signal: Optional[np.ndarray] | None = None,
+    water_pre_correction: Sequence[float] | None = None,
+    gpu_id: int = 0,
+    **kwargs,
+):
+    method = "rooster4d"
+
+    projections_filepath = Path(projections_filepath)
+    geometry_filepath = Path(geometry_filepath)
+
+    if not output_folder:
+        output_folder = projections_filepath.parent / "reconstructions"
+    if not output_filename:
+        output_filename = f"recon_{method}.mha"
+
+    output_folder = Path(output_folder)
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    reconstructor = ROOSTER4DReconstructor(
+        amplitude_signal=amplitude_signal,
+        phase_signal=phase_signal,
+        use_docker=True,
+        gpu_id=gpu_id,
+    )
+
+    recon_params = dict(
+        path=projections_filepath.parent,
+        regexp=projections_filepath.name,
+        geometry=geometry_filepath,
+        fp="CudaRayCast",
+        bp="CudaVoxelBased",
+        niter=10,
+        cgiter=4,
+        tviter=10,
+        gamma_time=0.0002,
+        gamma_space=0.00005,
+        dimension=dimension,
+        spacing=spacing,
+        wpc=water_pre_correction,
+        output_filepath=output_folder / output_filename,
+        **kwargs,
+    )
+    reconstructor.reconstruct(**recon_params)
+
+    with open((output_folder / output_filename).with_suffix(".yaml"), "w") as f:
+        yaml.dump(recon_params, f)
 
 
 @click.command()

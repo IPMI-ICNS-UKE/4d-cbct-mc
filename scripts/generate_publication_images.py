@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import SimpleITK as sitk
 
+from cbctmc.mc.materials import MATERIALS_125KEV
 from cbctmc.utils import resample_image_spacing
 
 
@@ -43,7 +44,7 @@ if __name__ == "__main__":
         "/mnt/nas_io/anarchy/4d_cbct_mc/speedup/024_4DCT_Lunge_amplitudebased_complete/phase_00/geometry_materials.nii.gz"
     )
 
-    slicing = np.index_exp[55:440, 140:360, 180]
+    slicing = np.index_exp[55:440, 140:360, 228]
     save_image(
         ct_image[slicing].T,
         cmap="gray",
@@ -62,6 +63,15 @@ if __name__ == "__main__":
         clim=(1, 20),
         filepath=OUTPUT_FOLDER / "workflow_row_1_material.png",
     )
+    # print HTML color codes
+    for material_number in np.unique(material_image[slicing]):
+        cmap = plt.get_cmap("jet")
+
+        rgba = cmap((material_number - 1) / (20 - 1))
+        rgb = rgba[:3]
+        for material_id, material in MATERIALS_125KEV.items():
+            if material.number == material_number:
+                print(f"material {material_number} ({material.identifier}): {rgb=}")
 
     # second row
     low_photon_projections = read_image(
@@ -101,7 +111,7 @@ if __name__ == "__main__":
         "/mnt/nas_io/anarchy/4d_cbct_mc/speedup/024_4DCT_Lunge_amplitudebased_complete/phase_00/reference/reconstructions/fdk3d_wpc.mha",
     )
 
-    slicing = np.index_exp[35:420, 102, 125:345]
+    slicing = np.index_exp[35:420, 55, 125:345]
     save_image(
         np.rot90(recon[slicing]),
         cmap="gray",
@@ -110,3 +120,43 @@ if __name__ == "__main__":
     )
 
     # 4D CIRS
+    real_clim = (-0.0040, 0.028)
+    mc_clim = (-0.00639, 0.02968)
+    real_4d_image = read_image(
+        "/data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cbct_phantom_data/2018_08_09_session_2/recons_custom/3d_fdk.mha"
+    )
+    mc_ref_4d_image = read_image(
+        "/datalake_fast/mc_output/4d_cirs_20_bins/4d_cirs/phase_02/reference/reconstructions/fdk3d_wpc.mha"
+    )
+    mc_speedup_50_low_photon_4d_image = read_image(
+        "/datalake_fast/mc_output/4d_cirs/4d_cirs_large/phase_02/speedup_50.00x/reconstructions/fdk3d_wpc.mha"
+    )
+    mc_speedup_50_4d_image = read_image(
+        "/datalake_fast/mc_output/4d_cirs/4d_cirs_large/phase_02/speedup_50.00x/reconstructions/fdk3d_wpc_speedup.mha"
+    )
+
+    slicing = np.index_exp[72:390, 119, 131:343]
+    save_image(
+        np.rot90(real_4d_image[slicing]),
+        cmap="gray",
+        clim=real_clim,
+        filepath=OUTPUT_FOLDER / "4d_cirs_real_ref.png",
+    )
+    save_image(
+        np.rot90(mc_ref_4d_image[72 - 2 : 390 - 2, 119, 131 + 2 : 343 + 2]),
+        cmap="gray",
+        clim=mc_clim,
+        filepath=OUTPUT_FOLDER / "4d_cirs_mc_ref.png",
+    )
+    save_image(
+        np.rot90(mc_speedup_50_low_photon_4d_image[slicing]),
+        cmap="gray",
+        clim=mc_clim,
+        filepath=OUTPUT_FOLDER / "4d_cirs_mc_speedup_50_low_photon.png",
+    )
+    save_image(
+        np.rot90(mc_speedup_50_4d_image[slicing]),
+        cmap="gray",
+        clim=mc_clim,
+        filepath=OUTPUT_FOLDER / "4d_cirs_mc_speedup_50.png",
+    )

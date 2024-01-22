@@ -13,27 +13,9 @@ from sklearn.model_selection import train_test_split
 
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 from cbctmc.logger import init_fancy_logging
-from cbctmc.reconstruction.reconstruction import reconstruct_3d
+from cbctmc.reconstruction.reconstruction import reconstruct_3d, reconstruct_4d
 from cbctmc.speedup.inference import MCSpeedup
 from cbctmc.speedup.metrics import psnr
-
-
-def calculate_metrics(
-    low_photon_projections: np.ndarray,
-    high_photon_projections: np.ndarray,
-    speedup_projections: np.ndarray,
-):
-    metrics = {}
-    # calculate PSNR
-    metrics["psnr_low_photon"] = psnr(
-        image=low_photon_projections, reference_image=high_photon_projections
-    )
-    metrics["psnr_speedup"] = psnr(
-        image=speedup_projections, reference_image=high_photon_projections
-    )
-
-    return metrics
-
 
 if __name__ == "__main__":
     init_fancy_logging()
@@ -45,8 +27,8 @@ if __name__ == "__main__":
 
     SPEEDUP_MODES = [
         # "speedup_10.00x",
-        # "speedup_20.00x",
-        "speedup_50.00x",
+        "speedup_20.00x",
+        # "speedup_50.00x",
     ]
 
     # mean model + var model more training (works)
@@ -103,8 +85,10 @@ if __name__ == "__main__":
             )
 
             patient_folder = Path(
-                f"/datalake_fast/mc_output/4d_cirs_20_bins/4d_cirs/phase_02"
+                f"/mnt/nas_io/anarchy/4d_cbct_mc/4d_2/024_4DCT_Lunge_amplitudebased_complete/phase_02"
             )
+
+            # patient_folder = Path("/mnt/nas_io/anarchy/4d_cbct_mc/4d/024_4DCT_Lunge_amplitudebased_complete/phase_02")
 
             # load projections
             low_photon_projections_filepath = (
@@ -118,16 +102,6 @@ if __name__ == "__main__":
             origin = low_photon_projections.GetOrigin()
             direction = low_photon_projections.GetDirection()
 
-            high_photon_projections_filepath = (
-                patient_folder / f"reference/projections_total_normalized.mha"
-            )
-            logger.info(
-                f"Load high projections from {high_photon_projections_filepath}"
-            )
-            high_photon_projections = sitk.ReadImage(
-                str(high_photon_projections_filepath)
-            )
-
             if not (
                 forward_projection_filepath := patient_folder
                 / speedup_mode
@@ -139,7 +113,6 @@ if __name__ == "__main__":
             forward_projection = sitk.ReadImage(str(forward_projection_filepath))
 
             low_photon_projections = sitk.GetArrayFromImage(low_photon_projections)
-            high_photon_projections = sitk.GetArrayFromImage(high_photon_projections)
             forward_projection = sitk.GetArrayFromImage(forward_projection)
 
             (
@@ -150,12 +123,6 @@ if __name__ == "__main__":
                 low_photon=low_photon_projections,
                 forward_projection=forward_projection,
                 batch_size=1,
-            )
-
-            metrics[speedup_mode][patient] = calculate_metrics(
-                low_photon_projections=low_photon_projections,
-                high_photon_projections=high_photon_projections,
-                speedup_projections=speedup_projections,
             )
 
             speedup_projections = sitk.GetImageFromArray(speedup_projections)
@@ -182,6 +149,22 @@ if __name__ == "__main__":
                 geometry_filepath=patient_folder / "geometry.xml",
                 output_folder=(patient_folder / speedup_mode / "reconstructions"),
                 output_filename="fdk3d_wpc_speedup.mha",
+                dimension=(464, 250, 464),
+                water_pre_correction=ReconDefaults.wpc_catphan604,
+                gpu_id=GPU_ID,
+            )
+
+            signal = np.loadtxt(patient_folder / speedup_mode / "signal.txt")
+            reconstruct_4d(
+                amplitude_signal=signal[:, 0],
+                projections_filepath=(
+                    patient_folder
+                    / speedup_mode
+                    / "projections_total_normalized_speedup.mha"
+                ),
+                geometry_filepath=patient_folder / "geometry.xml",
+                output_folder=(patient_folder / speedup_mode / "reconstructions"),
+                output_filename="rooster4d_wpc_speedup.mha",
                 dimension=(464, 250, 464),
                 water_pre_correction=ReconDefaults.wpc_catphan604,
                 gpu_id=GPU_ID,

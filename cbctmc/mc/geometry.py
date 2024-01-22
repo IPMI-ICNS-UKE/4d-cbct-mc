@@ -24,7 +24,7 @@ from cbctmc.common_types import FloatTuple3D, PathLike
 from cbctmc.mc.dataio import save_text_file
 from cbctmc.mc.materials import MATERIALS_125KEV, Material
 from cbctmc.mc.reference import REFERENCE_MU
-from cbctmc.mc.voxel_data import compile_voxel_data_string
+from cbctmc.mc.voxel_data import compile_voxel_data_string_fast
 from cbctmc.segmentation.labels import get_label_index
 from cbctmc.segmentation.segmenter import MCSegmenter
 from cbctmc.utils import resample_image_spacing
@@ -286,7 +286,6 @@ class MaterialMapperPipeline(
         stomach_segmentation: np.ndarray | PathLike | None = None,
         lung_segmentation: np.ndarray | PathLike | None = None,
         lung_vessel_segmentation: np.ndarray | PathLike | None = None,
-        overwrite_rules: dict | None = None,
         model: nn.Module | None = None,
         model_device: str = "cuda",
     ):
@@ -603,7 +602,9 @@ class MCGeometry:
 
         # add voxel_data here, so it does not get logged
         t_start = time.monotonic()
-        voxel_data = compile_voxel_data_string(materials=materials, densities=densities)
+        voxel_data = compile_voxel_data_string_fast(
+            materials=materials, densities=densities
+        )
         t_end = time.monotonic()
         params["voxel_data"] = voxel_data
 
@@ -732,6 +733,11 @@ class MCCIRSPhantomGeometry(MCGeometry):
         materials, densities = mapper_pipeline.execute(
             image, image_spacing=image_spacing
         )
+
+        # set lung to 0.207 * water
+        lung_segmentation = lung_segmentation.astype(bool)
+        materials[lung_segmentation] = MATERIALS_125KEV["h2o"].number
+        densities[lung_segmentation] = 0.207 * MATERIALS_125KEV["h2o"].density
 
         return cls(
             materials=materials,
