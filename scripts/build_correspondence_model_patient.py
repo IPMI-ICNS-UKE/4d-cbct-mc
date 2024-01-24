@@ -29,7 +29,7 @@ if __name__ == "__main__":
     from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
 
     logging.getLogger("cbctmc").setLevel(logging.DEBUG)
-    logging.getLogger("vroc").setLevel(logging.DEBUG)
+    logging.getLogger("vroc").setLevel(logging.INFO)
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
     init_fancy_logging()
@@ -40,7 +40,10 @@ if __name__ == "__main__":
 
     cbct_amplitude = np.loadtxt(folder / "cbct/amplitude_varian.txt")
     ct_amplitude = np.loadtxt(
-        folder / "ct/resp_curve/R2017025_1_1.vxp", skiprows=10, delimiter=",", usecols=0
+        folder / "ct_rai/resp_curve/R2017025_1_1.vxp",
+        skiprows=10,
+        delimiter=",",
+        usecols=0,
     )
     ct_amplitude = -ct_amplitude
 
@@ -103,7 +106,7 @@ if __name__ == "__main__":
     )
     plt.title("4D CT median respiratory cycle")
 
-    image_filepaths = [folder / f"ct/bin_{i:02d}.nii" for i in range(10)]
+    image_filepaths = [folder / f"ct_rai/bin_{i:02d}.nii" for i in range(10)]
 
     images = [read_image(image_filepath) for image_filepath in image_filepaths]
     images = np.stack(images, axis=0)
@@ -119,7 +122,7 @@ if __name__ == "__main__":
     model = CorrespondenceModel.build_default(
         images=images, signals=phase_signals, reference_phase=2, device=DEVICE
     )
-    model.save(folder / "correspondence_model.pkl")
+    model.save(folder / "correspondence_model_rai.pkl")
 
     # predict phases for comparison
     reference_image = images[2]

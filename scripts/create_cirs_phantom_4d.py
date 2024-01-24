@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -7,12 +8,21 @@ from scipy.signal import savgol_filter
 from vroc.blocks import SpatialTransformer
 
 from cbctmc.defaults import DefaultMCSimulationParameters as MCDefaults
+from cbctmc.logger import init_fancy_logging
 from cbctmc.mc.geometry import MCCIRSPhantomGeometry
 from cbctmc.mc.respiratory import RespiratorySignal
 from cbctmc.registration.correspondence import CorrespondenceModel
 
 if __name__ == "__main__":
-    output_folder = Path("/data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs_large")
+    logging.getLogger("cbctmc").setLevel(logging.DEBUG)
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    init_fancy_logging()
+
+    output_folder = Path(
+        "/data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs_large_with_water"
+    )
+    output_folder.mkdir(exist_ok=True, parents=True)
     geometry = MCCIRSPhantomGeometry.from_base_geometry()
 
     DEVICE = "cuda:0"

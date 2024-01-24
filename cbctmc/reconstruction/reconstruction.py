@@ -112,7 +112,7 @@ def reconstruct_4d(
         cgiter=4,
         tviter=10,
         gamma_time=0.0002,
-        gamma_space=0.00005,
+        gamma_space=0.00007,
         dimension=dimension,
         spacing=spacing,
         wpc=water_pre_correction,
@@ -212,4 +212,26 @@ def _cli(
 
 
 if __name__ == "__main__":
-    _cli()
+    # _cli()
+
+    amplitude_signal = np.loadtxt(
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/ct/phase_02/reference/signal.txt"
+    )[:, 0]
+
+    reconstruct_4d(
+        projections_filepath=Path(
+            "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/ct/phase_02/reference/projections_total_normalized.mha"
+        ),
+        geometry_filepath=Path(
+            "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/ct/phase_02/geometry.xml"
+        ),
+        output_folder=Path(
+            "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/ct/phase_02/reference/reconstructions"
+        ),
+        output_filename="rooster4d_wpc_00007.mha",
+        dimension=(464, 250, 464),
+        spacing=(1.0, 1.0, 1.0),
+        amplitude_signal=amplitude_signal,
+        water_pre_correction=ReconDefaults.wpc_catphan604,
+        gpu_id=0,
+    )

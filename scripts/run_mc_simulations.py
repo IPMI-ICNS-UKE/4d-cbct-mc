@@ -103,12 +103,12 @@ faulthandler.enable()
 @click.option(
     "--segmenter-patch-shape",
     type=click.Tuple([int, int, int]),
-    default=(496, 496, 128),
+    default=(256, 256, 128),
 )
 @click.option(
     "--segmenter-patch-overlap",
     type=click.FloatRange(0.0, 1.0, min_open=True, max_open=False),
-    default=0.25,
+    default=0.50,
 )
 @click.option(
     "--n-projections",
@@ -556,11 +556,11 @@ def run(
                                 / config_name
                                 / "projections_total_normalized.mha"
                             ),
-                            geometry_filepath=patient_folder / "geometry.xml",
+                            geometry_filepath=simulation_folder / "geometry.xml",
                             output_folder=(
                                 simulation_folder / config_name / "reconstructions"
                             ),
-                            output_filename="rooster4d_wpc_speedup.mha",
+                            output_filename="rooster4d_wpc.mha",
                             dimension=(464, 250, 464),
                             water_pre_correction=ReconDefaults.wpc_catphan604,
                             gpu_id=gpu[0],

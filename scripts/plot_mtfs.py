@@ -15,11 +15,11 @@ if __name__ == "__main__":
     fig, ax = plt.subplots()
     for mode in (
         "reference",
-        # "speedup_10.00x",
+        "speedup_10.00x",
         # "speedup_20.00x",
         # "speedup_50.00x",
     ):
-        for with_speedup_model in (False, True):
+        for with_speedup_model in (False,):
             minimums = []
             maximums = []
             line_pair_spacings = []
@@ -32,7 +32,7 @@ if __name__ == "__main__":
                     continue
 
                 filepath = Path(
-                    f"/mnt/nas_io/anarchy/4d_cbct_mc/mc_mtf_final/lp_{gap:.2f}gap/{mode}/reconstructions/fdk3d_wpc.mha"
+                    f"/mnt/nas_io/anarchy/4d_cbct_mc/mc_mtf_final_0/lp_{gap:.2f}gap/{mode}/reconstructions/fdk3d_wpc.mha"
                 )
                 image = sitk.ReadImage(filepath)
                 image_spacing = image.GetSpacing()
@@ -88,6 +88,8 @@ if __name__ == "__main__":
             spatial_frequency = 1 / np.array(list(mtf.keys()))
             mtf = np.array(list(mtf.values()))
 
+            print("***")
+            print(mode)
             print(
                 tabulate.tabulate(
                     zip(spatial_frequency, mtf),

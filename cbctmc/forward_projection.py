@@ -68,10 +68,15 @@ def prepare_image_for_rtk(
     image.SetSpacing(image_spacing)
 
     voxel_size = image.GetSpacing()
+
+    voxel_size = [voxel_size[1], voxel_size[2], voxel_size[0]]
     origin = [
-        -0.5 * n_voxels * voxel_size
-        for (n_voxels, voxel_size) in zip(image.shape, voxel_size)
+        -0.5 * n_voxels * _voxel_size
+        for (n_voxels, _voxel_size) in zip(image.shape, voxel_size)
     ]
+    origin = [origin[2], origin[1], origin[0]]
+    print("TODO check FP fix:")
+    print((image.shape, voxel_size, origin))
 
     # add half voxel size to the origin as MC-GPU defines voxels based on
     # lower voxel edge not voxel center as ITK

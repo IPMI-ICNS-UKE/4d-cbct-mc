@@ -118,6 +118,7 @@ class MCSpeedup(ForwardPassMixin):
             low_photon, forward_projection = self.preprocess_inputs(
                 low_photon=low_photon, forward_projection=forward_projection
             )
+
             mean, variance = self.forward_pass_model(
                 low_photon=low_photon, forward_projection=forward_projection
             )

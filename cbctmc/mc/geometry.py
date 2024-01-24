@@ -293,7 +293,7 @@ class MaterialMapperPipeline(
         pipeline = [
             (BodyROIMaterialMapper(), body_segmentation),
             (BoneMaterialMapper(), bone_segmentation),
-            (LungMaterialMapper(use_air=True), lung_segmentation),
+            (LungMaterialMapper(use_air=False), lung_segmentation),
             (LiverMaterialMapper(), liver_segmentation),
             (StomachMaterialMapper(), stomach_segmentation),
             (MuscleMaterialMapper(), muscle_segmentation),
@@ -518,11 +518,14 @@ class MCGeometry:
                 default_voxel_value=-1000,
             )
 
+        # TODO: only works with RAI orientation
         image_spacing = image.GetSpacing()
         image_origin = image.GetOrigin()
         image_direction = image.GetDirection()
+
         # convert to numpy, swap zyx (itk) -> xyz (numpy)
         image = sitk.GetArrayFromImage(image).swapaxes(0, 2)
+        logger.info(f"Loaded image with shape: {image.shape}")
 
         if segmenter:
             # if a segmenter is given: predict segmentations
@@ -591,8 +594,8 @@ class MCGeometry:
             "n_voxels_x": n_voxels_x,
             "n_voxels_y": n_voxels_y,
             "n_voxels_z": n_voxels_z,
-            "voxel_spacing_x": image_spacing[0] / 10.0,
-            "voxel_spacing_y": image_spacing[1] / 10.0,
+            "voxel_spacing_x": image_spacing[1] / 10.0,  # switch 0, 1 due to rot
+            "voxel_spacing_y": image_spacing[0] / 10.0,
             "voxel_spacing_z": image_spacing[2] / 10.0,
         }
 
@@ -790,6 +793,73 @@ class MCCIRSPhantomGeometry(MCGeometry):
         sphere_mask[cutout_mask] = False
 
         return sphere_mask
+
+    def place_line_pair_insert(self, gap: float = 4):
+        geometry = self.copy()
+
+        geometry.materials = np.repeat(geometry.materials, 4, axis=0)
+        geometry.densities = np.repeat(geometry.densities, 4, axis=0)
+
+        # geometry.materials = np.repeat(geometry.materials, 2, axis=1)
+        # geometry.densities = np.repeat(geometry.densities, 2, axis=1)
+        #
+        # geometry.materials = np.repeat(geometry.materials, 2, axis=2)
+        # geometry.densities = np.repeat(geometry.densities, 2, axis=2)
+
+        geometry.image_spacing = (0.25, 1.0, 1.0)
+
+        gap_voxel = int(gap // geometry.image_spacing[0])
+        line_pair_voxel = 2 * gap_voxel
+        n_line_pairs = 4
+
+        insert_center = np.array(
+            [
+                238 / geometry.image_spacing[0] - n_line_pairs / 2 * line_pair_voxel,
+                141 / geometry.image_spacing[1],
+                71 / geometry.image_spacing[2],
+            ]
+        ).astype(int)
+
+        width = 20
+        for i_line_pair in range(n_line_pairs):
+            offset = i_line_pair * line_pair_voxel
+            geometry.materials[
+                insert_center[0] + offset : insert_center[0] + offset + gap_voxel,
+                insert_center[1] - width : insert_center[1] + width :,
+                insert_center[2] - width : insert_center[2] + width,
+            ] = MATERIALS_125KEV["aluminium"].number
+            geometry.densities[
+                insert_center[0] + offset : insert_center[0] + offset + gap_voxel,
+                insert_center[1] - width : insert_center[1] + width :,
+                insert_center[2] - width : insert_center[2] + width,
+            ] = MATERIALS_125KEV["aluminium"].density
+
+            geometry.materials[
+                insert_center[0]
+                + offset
+                + gap_voxel : insert_center[0]
+                + offset
+                + 2 * gap_voxel,
+                insert_center[1] - width : insert_center[1] + width :,
+                insert_center[2] - width : insert_center[2] + width,
+            ] = MATERIALS_125KEV["h2o"].number
+            geometry.densities[
+                insert_center[0]
+                + offset
+                + gap_voxel : insert_center[0]
+                + offset
+                + 2 * gap_voxel,
+                insert_center[1] - width : insert_center[1] + width :,
+                insert_center[2] - width : insert_center[2] + width,
+            ] = (
+                0.207 * MATERIALS_125KEV["h2o"].density
+            )
+
+        # geometry = geometry.pad_to_shape(
+        #     tuple(s + 1 if s % 2 == 0 else s for s in geometry.image_shape)
+        # )
+
+        return geometry
 
     def place_insert(
         self,
@@ -1185,12 +1255,60 @@ class MCLinePairPhantomGeometry(MCWaterPhantomGeometry):
         self.densities[mask] = self.line_material.density
 
 
-# if __name__ == "__main__":
-# geometry = MCLinePairPhantomGeometry(
-#     line_gap=4,
-#     image_spacing=(0.25, 0.25, 0.25),
-#     radius=30,
-#     length=30,
-#     shape=(250, 250, 125),
-# )
-# geometry.save_density_image("/datalake2/mc_test/geometry_densities.nii.gz")
+class MCLinePairPhantomGeometry2(MCGeometry):
+    def __init__(
+        self,
+        line_gap: int,
+        line_material: Material = MATERIALS_125KEV["h2o"],
+        shape: Tuple[int, int, int] = (500, 500, 500),
+        image_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    ):
+        materials = np.full(
+            shape, fill_value=MATERIALS_125KEV["air"].number, dtype=np.uint8
+        )
+        densities = np.full(
+            shape, fill_value=MATERIALS_125KEV["air"].density, dtype=np.float32
+        )
+
+        super().__init__(
+            materials=materials, densities=densities, image_spacing=image_spacing
+        )
+        # check if line gap is a multiple of the image spacing
+        if line_gap % self.image_spacing[0] != 0:
+            raise ValueError("Line gap must be a multiple of the image spacing")
+
+        self.isotropic_image_spacing = image_spacing[0]
+
+        self.line_gap_voxels = int(line_gap / self.isotropic_image_spacing)
+        self.line_material = line_material
+        self.line_depth_voxels = int(20 / self.isotropic_image_spacing)
+
+        self._add_line_pairs()
+
+    def _create_line_pair_mask(self):
+        mask = np.zeros_like(self.materials)
+        center = np.array(mask.shape) // 2
+        for i in range(0, mask.shape[0], 2 * self.line_gap_voxels):
+            mask[
+                i : i + self.line_gap_voxels,
+                center[1]
+                - self.line_depth_voxels // 2 : center[1]
+                + self.line_depth_voxels // 2,
+                center[2]
+                - self.line_depth_voxels // 2 : center[2]
+                + self.line_depth_voxels // 2,
+            ] = 1
+
+        return mask.astype(bool)
+
+    def _add_line_pairs(self):
+        mask = self._create_line_pair_mask()
+
+        self.materials[mask] = self.line_material.number
+        self.densities[mask] = self.line_material.density
+
+
+if __name__ == "__main__":
+    geometry = MCCIRSPhantomGeometry.from_base_geometry()
+    geometry = geometry.place_line_pair_insert(gap=0.5)
+    geometry.save_density_image("/datalake2/mc_test/cirs_mtf.nii.gz")

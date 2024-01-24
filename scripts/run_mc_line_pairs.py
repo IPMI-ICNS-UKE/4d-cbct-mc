@@ -23,7 +23,11 @@ from cbctmc.forward_projection import (
     project_forward,
     save_geometry,
 )
-from cbctmc.mc.geometry import MCLinePairPhantomGeometry
+from cbctmc.mc.geometry import (
+    MCCIRSPhantomGeometry,
+    MCLinePairPhantomGeometry,
+    MCLinePairPhantomGeometry2,
+)
 from cbctmc.mc.simulation import MCSimulation
 
 
@@ -43,7 +47,7 @@ from cbctmc.mc.simulation import MCSimulation
 @click.option(
     "--phantom-image-spacing",
     type=click.Tuple([float, float, float]),
-    default=(0.25, 0.25, 0.25),
+    default=(0.5, 0.5, 0.5),
     help="Image spacing of the MC phantom",
 )
 @click.option(
@@ -55,13 +59,13 @@ from cbctmc.mc.simulation import MCSimulation
 @click.option(
     "--phantom-radius",
     type=float,
-    default=30,
+    default=250,
     help="Radius of the MC phantom",
 )
 @click.option(
     "--phantom-length",
     type=float,
-    default=30,
+    default=250,
     help="Length of the MC phantom",
 )
 @click.option(
@@ -144,13 +148,17 @@ def run(
     output_folder.mkdir(parents=True, exist_ok=True)
     simulation_folder = output_folder
 
-    geometry = MCLinePairPhantomGeometry(
-        line_gap=line_gap,
-        image_spacing=phantom_image_spacing,
-        radius=phantom_radius,
-        length=phantom_length,
-        shape=phantom_shape,
-    )
+    # geometry = MCLinePairPhantomGeometry(
+    #     line_gap=line_gap,
+    #     image_spacing=phantom_image_spacing,
+    #     radius=phantom_radius,
+    #     length=phantom_length,
+    #     shape=phantom_shape,
+    # )
+
+    geometry = MCCIRSPhantomGeometry.from_base_geometry()
+    geometry = geometry.place_line_pair_insert(gap=line_gap)
+
     geometry.save_material_segmentation(simulation_folder / "geometry_materials.nii.gz")
     geometry.save_density_image(simulation_folder / "geometry_densities.nii.gz")
     geometry.save(simulation_folder / "geometry.pkl.gz")
@@ -161,6 +169,7 @@ def run(
         input_value_range=None,
         output_value_range=None,
     )
+    itk.imwrite(image, str(simulation_folder / "density.nii.gz"))
     logger.info("Perform forward projection")
     fp_geometry = create_geometry(start_angle=90, n_projections=n_projections)
     forward_projection = project_forward(

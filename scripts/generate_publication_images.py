@@ -120,19 +120,19 @@ if __name__ == "__main__":
     )
 
     # 4D CIRS
-    real_clim = (-0.0040, 0.028)
+    real_clim = (-0.0060, 0.0286)
     mc_clim = (-0.00639, 0.02968)
     real_4d_image = read_image(
         "/data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cbct_phantom_data/2018_08_09_session_2/recons_custom/3d_fdk.mha"
     )
     mc_ref_4d_image = read_image(
-        "/datalake_fast/mc_output/4d_cirs_20_bins/4d_cirs/phase_02/reference/reconstructions/fdk3d_wpc.mha"
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/cirs/output/4d_cirs_large_with_water/phase_02/reference/reconstructions/fdk3d_wpc.mha"
     )
     mc_speedup_50_low_photon_4d_image = read_image(
-        "/datalake_fast/mc_output/4d_cirs/4d_cirs_large/phase_02/speedup_50.00x/reconstructions/fdk3d_wpc.mha"
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/cirs/output/4d_cirs_large_with_water/phase_02/speedup_50.00x/reconstructions/fdk3d_wpc.mha"
     )
     mc_speedup_50_4d_image = read_image(
-        "/datalake_fast/mc_output/4d_cirs/4d_cirs_large/phase_02/speedup_50.00x/reconstructions/fdk3d_wpc_speedup.mha"
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/cirs/output/4d_cirs_large_with_water/phase_02/speedup_50.00x/reconstructions/fdk3d_wpc_speedup.mha"
     )
 
     slicing = np.index_exp[72:390, 119, 131:343]

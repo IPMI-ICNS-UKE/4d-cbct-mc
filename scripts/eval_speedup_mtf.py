@@ -5,6 +5,7 @@ from pathlib import Path
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 import logging
 
+import matplotlib.pyplot as plt
 import SimpleITK as sitk
 
 from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
@@ -22,8 +23,8 @@ if __name__ == "__main__":
 
     SPEEDUP_MODES = [
         # "speedup_10.00x",
-        # "speedup_20.00x",
-        "speedup_50.00x",
+        "speedup_20.00x",
+        # "speedup_50.00x",
     ]
 
     # mean model + var model more training (works)
@@ -47,6 +48,8 @@ if __name__ == "__main__":
             folder = Path(
                 f"/mnt/nas_io/anarchy/4d_cbct_mc/mc_mtf_final/lp_{gap:.2f}gap_large"
             )
+            folder = Path("/datalake2/mc_mtf_debug/lp_1.00gap_cirs")
+            # folder = Path('/datalake_fast/mc_output/4d_cirs/4d_cirs_large/phase_02')
 
             # load projections
             low_photon_projections = sitk.ReadImage(
@@ -73,6 +76,14 @@ if __name__ == "__main__":
                 batch_size=1,
             )
 
+            fix, ax = plt.subplots(1, 5, sharex=True, sharey=True)
+            ax[0].imshow(low_photon_projections[1])
+            ax[1].imshow(speedup_projections_mean[1])
+            ax[2].imshow(speedup_projections_variance[1])
+            ax[3].imshow(speedup_projections[1])
+            ax[4].imshow(forward_projection[1])
+            plt.show()
+
             speedup_projections = sitk.GetImageFromArray(speedup_projections)
             speedup_projections.SetSpacing(spacing)
             speedup_projections.SetOrigin(origin)
@@ -85,15 +96,15 @@ if __name__ == "__main__":
                 ),
             )
 
-            logger.info("Reconstruct simulation")
-            reconstruct_3d(
-                projections_filepath=(
-                    folder / speedup_mode / "projections_total_normalized_speedup.mha"
-                ),
-                geometry_filepath=folder / "geometry.xml",
-                output_folder=(folder / speedup_mode / "reconstructions"),
-                output_filename="fdk3d_wpc_speedup.mha",
-                dimension=(464, 250, 464),
-                water_pre_correction=ReconDefaults.wpc_catphan604,
-                gpu_id=GPU_ID,
-            )
+            # logger.info("Reconstruct simulation")
+            # reconstruct_3d(
+            #     projections_filepath=(
+            #         folder / speedup_mode / "projections_total_normalized_speedup.mha"
+            #     ),
+            #     geometry_filepath=folder / "geometry.xml",
+            #     output_folder=(folder / speedup_mode / "reconstructions"),
+            #     output_filename="fdk3d_wpc_speedup.mha",
+            #     dimension=(464, 250, 464),
+            #     water_pre_correction=ReconDefaults.wpc_catphan604,
+            #     gpu_id=GPU_ID,
+            # )
