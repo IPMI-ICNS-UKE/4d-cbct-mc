@@ -80,12 +80,12 @@ if __name__ == "__main__":
 
         for patient in test_patients:
             logger.info(f"{patient=}, {speedup_mode=}")
-            patient_folder = Path(
-                f"/mnt/nas_io/anarchy/4d_cbct_mc/speedup/{patient:03d}_4DCT_Lunge_amplitudebased_complete/phase_00"
-            )
+            # patient_folder = Path(
+            #     f"/mnt/nas_io/anarchy/4d_cbct_mc/speedup/{patient:03d}_4DCT_Lunge_amplitudebased_complete/phase_00"
+            # )
 
             patient_folder = Path(
-                f"/mnt/nas_io/anarchy/4d_cbct_mc/4d_2/024_4DCT_Lunge_amplitudebased_complete/phase_02"
+                f"/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/ct_rai/phase_02"
             )
 
             # patient_folder = Path("/mnt/nas_io/anarchy/4d_cbct_mc/4d/024_4DCT_Lunge_amplitudebased_complete/phase_02")
