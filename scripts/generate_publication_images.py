@@ -160,3 +160,60 @@ if __name__ == "__main__":
         clim=mc_clim,
         filepath=OUTPUT_FOLDER / "4d_cirs_mc_speedup_50.png",
     )
+
+    # 4D end-to-en
+    # real_clim = (-0.0013, 0.03009)
+    # mc_clim = (-0.00236, 0.030)
+    # ct_clim = (-1024, 800)
+
+    real_clim = (-0.00691, 0.02903)
+    mc_clim = (-0.00319, 0.02905)
+    mc_speedup_clim = (-0.00480, 0.02905)
+    ct_clim = (-1024, 800)
+    real_4d_image = read_image(
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/cbct/3d_fdk_reg_to_mc.mha"
+    )
+    real_4d_ct_image = read_image(
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/ct_rai/avg_reg_to_mc.nii"
+    )
+    mc_ref_4d_image = read_image(
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/ct_rai/phase_02/reference/reconstructions/fdk3d_wpc.mha"
+    )
+    mc_speedup_20_low_photon_4d_image = read_image(
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/ct_rai/phase_02/speedup_20.00x/reconstructions/fdk3d_wpc.mha"
+    )
+    mc_speedup_20_4d_image = read_image(
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/ct_rai/phase_02/speedup_20.00x/reconstructions/fdk3d_wpc_speedup.mha"
+    )
+
+    slicing = np.index_exp[58:418, 105, 127:313]
+    save_image(
+        np.rot90(real_4d_image[slicing]),
+        cmap="gray",
+        clim=real_clim,
+        filepath=OUTPUT_FOLDER / "4d_patient_real_ref.png",
+    )
+    save_image(
+        np.rot90(real_4d_ct_image[slicing]),
+        cmap="gray",
+        clim=ct_clim,
+        filepath=OUTPUT_FOLDER / "4d_patient_real_ct.png",
+    )
+    save_image(
+        np.rot90(mc_ref_4d_image[slicing]),
+        cmap="gray",
+        clim=mc_clim,
+        filepath=OUTPUT_FOLDER / "4d_patient_mc_ref.png",
+    )
+    save_image(
+        np.rot90(mc_speedup_20_low_photon_4d_image[slicing]),
+        cmap="gray",
+        clim=mc_clim,
+        filepath=OUTPUT_FOLDER / "4d_patient_mc_speedup_20_low_photon.png",
+    )
+    save_image(
+        np.rot90(mc_speedup_20_4d_image[slicing]),
+        cmap="gray",
+        clim=mc_clim,
+        filepath=OUTPUT_FOLDER / "4d_patient_mc_speedup_20.png",
+    )

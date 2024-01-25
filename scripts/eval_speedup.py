@@ -26,8 +26,8 @@ if __name__ == "__main__":
     logging.getLogger("cbctmc").setLevel(logging.DEBUG)
 
     SPEEDUP_MODES = [
-        # "speedup_10.00x",
-        "speedup_20.00x",
+        "speedup_10.00x",
+        # "speedup_20.00x",
         # "speedup_50.00x",
     ]
 
