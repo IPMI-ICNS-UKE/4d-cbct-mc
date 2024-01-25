@@ -1,17 +1,11 @@
 from pathlib import Path
 
-import numpy as np
 from ipmi.common.logger import init_fancy_logging
 from sklearn.model_selection import train_test_split
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.utils.data import DataLoader
 
-import torch
-from torch.utils.data import BatchSampler
-from torch.utils.data import SequentialSampler
-
-from cbctmc.speedup.sampler import GroupedSampler
 from cbctmc.config import get_user_config
 from cbctmc.speedup.dataset import MCSpeedUpDataset
 from cbctmc.speedup.models import ResidualDenseNet2D
@@ -57,19 +51,19 @@ if __name__ == "__main__":
     logger.info(f"Test patients ({len(test_patients)}): {test_patients}")
 
     user, config = get_user_config()
-    logger.info(f'Current user is {user} with config {config}')
+    logger.info(f"Current user is {user} with config {config}")
 
     train_dataset = MCSpeedUpDataset.from_folder(
         folder=config["root_folder"] / "results",
         patient_ids=train_patients,
         runs=range(10),
-        eight=False
+        eight=False,
     )
     test_dataset = MCSpeedUpDataset.from_folder(
         folder=config["root_folder"] / "results",
         patient_ids=test_patients,
         runs=range(10),
-        eight=False
+        eight=False,
     )
     # mcsampler = GroupedSampler(runs=15, data_source=train_dataset, batch_size=8, shuffle=True)
     # train_data_loader = DataLoader(
@@ -107,6 +101,6 @@ if __name__ == "__main__":
         device=config["device"],
         max_var_correction=0.5,
         scheduler=scheduler,
-        scatter=True
+        scatter=True,
     )
     trainer.run(steps=100_000_000, validation_interval=7001, save_interval=500)

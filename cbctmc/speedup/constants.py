@@ -10,6 +10,10 @@ scale_high_theo = pixel_area / (mean_energy * factor_beam_hardening) * n_photons
 
 
 # detector pixel stats
-low_photon_stats = {'max': 38.557983, 'p99': 29.02514141345405}
-high_photon_stats = {'max': 29.884777, 'p99': 28.433749507478936}
-global_max_pixel_value = max(low_photon_stats['max'], high_photon_stats['max'])
+# maximum of max and mean of p99
+low_photon_stats = {"max": 8.711442, "p99": 4.340285567627859}
+high_photon_stats = {"max": 7.217965, "p99": 4.320198940555545}
+global_max_pixel_value = max(low_photon_stats["max"], high_photon_stats["max"])
+
+
+HIGH_VAR_MEAN_RATIO = 0.00477792

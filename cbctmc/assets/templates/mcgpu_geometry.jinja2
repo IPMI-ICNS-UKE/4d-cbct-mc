@@ -1,0 +1,127 @@
+# >>>> PenEasy SAMPLE VOXEL GEOMETRY FILE >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# GENERAL INSTRUCTIONS FOR VOXEL GEOMETRIES
+#
+# * Voxels are assumed to have their sides parallel to the axis of the Cartesian
+#   reference frame (called S hereafter) used for the simulation. The voxels
+#   bounding box, the imaginary rectangular box that delimits the set of defined
+#   voxels, is implicitly assumed to lie in the first octant of S, that is, in
+#   the region {x>0,y>0,z>0}. The voxel with indices equal to (i,j,k)=(1,1,1)
+#   has one of its corners at the origin of S. Thus, the coordinates of the
+#   center of each voxel can be inferred from its indices (i,j,k) and the length
+#   of the sides. The latter are entered in the HEADER SECTION below.
+#
+# * Notice that the above implies that the frame S is completely determined by
+#   the voxels bounding box. Thus, when an overlapping combination of both a
+#   voxelized and a quadric geometries is defined, the quadric geometry must be
+#   referred to this frame S by having recourse, if necessary, to the
+#   appropriate rotations and translations of the quadric objects.
+#
+# * With penEasy, a material ID and a mass density must be declared for each
+#   voxel. This means that varying densities can be attributed to the same
+#   chemical composition, the latter being defined in a material data file for
+#   PENELOPE. Hence, as far as the voxelized geometry is concerned, the
+#   'nominal' density defined in the PENELOPE material file is superseded by the
+#   entries in this file.
+#
+# * Differential cross sections models in PENELOPE depend on the chemical
+#   composition but not on the mass density, except for the so-called density
+#   effect correction (D) for inelastic collisions of charged particles (see the
+#   PENELOPE manual). penEasy assumes the value of D computed by PENELOPE for the
+#   nominal density declared when creating the material file and, thus, variations
+#   of D with local densities of voxels made of the same material are neglected.
+#   This may limit the accuracy of, e.g., absorbed dose distributions. The effect
+#   of this approximation is expected to be relatively small if density variations
+#   from voxel to voxel (of the same material) are kept below reasonable limits.
+#   For instance, the mass stopping power for electrons in water, considering the
+#   value of D computed using PENELOPE's model, varies by less than 0.8% when
+#   the mass density varies by as much as +- 20% with respect to the nominal value
+#   of 1 g/cm3.
+#
+#
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# GENERAL FORMATTING INSTRUCTIONS
+#
+# * Lines starting with a '#' (in column 1) are taken as comments.
+#   Comments are NOT allowed inside the VOXELS HEADER SECTION (below).
+#
+# * Blank lines are NOT comments; they should be avoided except when expected.
+#
+#
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# INSTRUCTIONS FOR THE VOXELS HEADER SECTION
+#
+# * The VOXELS HEADER has a version number of the form yyyy-mm-dd that
+#   is written in the section title. Should an incorrect version be
+#   introduced an error message would be issued and the execution halted.
+#
+# * Columns other than the ones entered in the COLUMN NUMBER fields (for
+#   MATERIAL and DENSITY) are skipped; in particular, if the data contains the
+#   voxels cartesian coordinates, these will be ignored--and inferred from the
+#   voxel indices and the values entered in the VOXEL SIZE field.
+#
+# * The BLANK LINES field determines whether blank lines separate data groups
+#   or not, as described below in detail.
+#
+# * Do not change the order in which data fields appear in the HEADER.
+#
+[SECTION VOXELS HEADER v.2008-04-13]
+{{ n_voxels_x }} {{ n_voxels_y }} {{ n_voxels_z }}  # SIZE IN X, Y, Z
+{{ voxel_spacing_x }} {{ voxel_spacing_y }} {{ voxel_spacing_z }}  # VOXEL SPACING IN X, Y, Z
+1  # COLUMN NUMBER WHERE MATERIAL ID IS LOCATED
+2  # COLUMN NUMBER WHERE MASS DENSITY IS LOCATED
+1  # BLANK LINES AT END OF X,Y-CYCLES (1=YES, 0=NO)
+[END OF VXH SECTION]
+#
+#
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# DESCRIPTION OF THE DATA FORMAT
+#
+# * Each record (i.e., line) defines a single voxel and must contain at least two
+#   columns. One of the two columns must contain an integer number representing the
+#   material ID according to the ordering employed in the PENELOPE material data
+#   file (see PENELOPE documentation). The other column must contain a real number,
+#   the mass density (in g/cm^3) of the voxel.
+#
+# * Vacuum voxels, that is, voxels with null material index, are not allowed.
+#   The program will issue an error message and abort the execution if a vacuum
+#   voxel is found. However, voxels with null density are accepted. In this latter
+#   case, penEasy substitutes the null density by 10^(-30) g/cm3---practically
+#   zero---to avoid computational issues.
+#
+# * Data columns are separated with one or more spaces. Each record should not
+#   exceed 500 characters in length.
+#
+# * The precedence of the x,y,z indices must be set with the x-index running
+#   fastest, the y-index slower and the z slowest. If the field in the VOXELS
+#   HEADER named 'BLANK LINES...' is set to 1 (i.e. YES), then one and two blank
+#   lines must be present after the completion of each cycle of the x- and y-
+#   indices, respectively. For example, for a 3*2*2 voxels geometry, the three
+#   indices evolve in this way:
+#     {1,1,1}
+#     {2,1,1}
+#     {3,1,1}
+#     <blank line>   (only if 'BLANK LINES...' is set to 1)
+#     {1,2,1}
+#     {2,2,1}
+#     {3,2,1}
+#     <blank line>   (ditto)
+#     <blank line>
+#     {1,1,2}
+#     {2,1,2}
+#     {3,1,2}
+#     <blank line>
+#     {1,2,2}
+#     {2,2,2}
+#     {3,2,2}        (this is the last line read; further lines are neglected)
+#     <End of file>
+#
+# * This format (including the blank lines) is compatible with the
+#   graphics program Gnuplot except for the HEADER section, which should be
+#   commented out with '#' to allow direct graphical representation of the
+#   voxels data. Gnuplot scripts are provided with the penEasy package to
+#   visualize material ID and mass density maps of the voxels in the present
+#   file.
+#
+#
+# >>>> DATA BEGINS >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+{{ voxel_data }}
