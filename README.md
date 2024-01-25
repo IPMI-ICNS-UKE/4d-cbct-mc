@@ -1,53 +1,75 @@
-# CBCT_Simulation
-## Commands
-### To run the simulation
+# 4D CBCT Monte Carlo Simulation
+This repository contains the official code for the following [paper](https://rdcu.be/baQa3):
+
 ```
-run-mc --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/speedup --reference --speedups 2 --speedups 5 --speedups 10 --phases 0 --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --segmenter-patch-overlap 0.75 --reconstruct --gpu 0 --gpu 1
+@article{madesta:2024,
+    doi = {XXX},
+    year = {2024},
+    month = {XXX},
+    publisher = {XXX},
+    volume = {XXX},
+    number = {XXX},
+    pages = {XXX},
+    author = {Frederic Madesta, Thilo Sentker, Clemens Rohling, Tobias Gauer, and Ren\'{e} Werner},
+    title = {Monte Carlo-based simulation of virtual 3D and 4D Cone-Beam CT from CT images: An end-to-end framework and a novel deep learning-based speedup strategy},
+    journal = {XXX}
+}
+
 ```
+## Overview
+This package contains all the required code to perform the following tasks in a fully automated end-to-end fashion:
+
+- Deep learning-based segmentation of CT images into various organ and tissue classes
+- Monte Carlo simulation of 3D CBCT images from CT images
+- Monte Carlo simulation of 4D CBCT images from CT images with respective [correspondence models](https://doi.org/10.1088/0031-9155/59/5/1147) and respiratory signals
+- Reconstruction of 3D and 4D CBCT images from simulated projections using the [Reconstruction Toolkit (RTK)](https://www.openrtk.org/)
+
+Both the MC as well as the reconstruction code are shipped as pre-compiled binaries in a Docker image for user experience reasons.
 
 
-run-mc --data-folder /datalake_fast/4d_ct_lung_uke_artifact_free --output-folder /datalake_fast/mc_output/3d --phases 0 --gpu 0 --reference --regex 024.* --n-projections 90
-
-run-mc --data-folder /datalake_fast/4d_ct_lung_uke_artifact_free --output-folder /datalake_fast/mc_output/3d --phases 0 --gpu 0 --reference --regex 024.* --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --segmenter-patch-overlap 0.25 --segmenter-patch-shape 128 128 128
-
-run-mc --data-folder /datalake_fast/4d_ct_lung_uke_artifact_free --output-folder /datalake_fast/mc_output/4d --phases 0  --gpu 0 --reference --regex 024.* --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl
-
-run-mc --data-folder /datalake_fast/4d_ct_lung_uke_artifact_free --output-folder /datalake_fast/mc_output/4d --phases 0 --gpu 0 --reference --regex 024.* --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --segmenter-patch-overlap 0.25 --segmenter-patch-shape 496 496 32 --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl
-
-
-run-mc --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/speedup --phases 0 --gpu 0 --gpu 1 --gpu 2 --gpu 4 --gpu 5  --speedups 20 --speedups 50 --regex 024.* --forward-projection --reconstruct
-
-
-
-
-run-mc --data-folder /data_l79a/fmadesta/4d_cbct/R4DCIRS/4DCT --output-folder /datalake_fast/mc_output/4d_cirs --phases 2 --gpu 0 --speedups 10 --regex phase_based_gt_curve --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --segmenter-patch-overlap 0.25 --segmenter-patch-shape 288 288 32 --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/cirs_correspondence_model.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/cirs_varian_respiratory_signal.pkl --respiratory-signal-quantization 20 --cirs-phantom --reconstruct
-
-run-mc --output-folder /datalake_fast/mc_output/4d_cirs --phases 2 --gpu 1 --reference --geometry-filepath /data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs/cirs_phase_02.pkl --correspondence-model /data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs/cirs_correspondence_model.pkl --respiratory-signal /data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs/cirs_varian_respiratory_signal.pkl --respiratory-signal-quantization 40 --cirs-phantom --reconstruct
+## Installation
+### Prerequisites
+- [Docker Engine](https://docs.docker.com/engine/install/)
+- [Nvidia Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- [Python 3.11 or later](https://docs.conda.io/projects/miniconda/en/latest/)
 
 
 
+## Usage
+### Data preparation
+In general, the framework requires very litte data preparation:
+- The CT images should be stored in a single-file format (e.g. ```*.nii```, ```*.mha``` or any other format that can be read by ITK)
+- The CT images should have non-preporcessed Hounsfield units (HU), i.e. the HU values should be in the range [-1024, 3071]
 
 
-CatPhan runs:
-run-mc --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/catphan --gpu 0 --gpu 1 --gpu 2 --reference --speedups 10.0 --speedups 20.0 --speedups 50.0 --catphan-phantom --reconstruct
-
-
-4D CIRS runs:
-run-mc --output-folder /datalake_fast/mc_output/4d_cirs --phases 2 --gpu 1 --gpu 0 --reference --geometry-filepath /data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs/cirs_phase_02.pkl --correspondence-model /data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs/cirs_correspondence_model.pkl --respiratory-signal /data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs/cirs_varian_respiratory_signal.pkl --respiratory-signal-quantization 20 --cirs-phantom --reconstruct --forward-projection
-run-mc --output-folder /datalake_fast/mc_output/4d_cirs --phases 2 --gpu 1 --gpu 0 --speedups 20 --geometry-filepath /data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs_large/cirs_phase_02.pkl --correspondence-model /data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs_large/cirs_correspondence_model.pkl --respiratory-signal /data_l79a/fmadesta/4d_cbct/R4DCIRS/for_mc/4d_cirs_large/cirs_varian_respiratory_signal.pkl --respiratory-signal-quantization 20 --cirs-phantom --reconstruct --forward-projection
-
-run-mc --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d/cirs/output --phases 2 --gpu 0 --gpu 1 --gpu 2 --reference --speedups 50 --geometry-filepath /mnt/nas_io/anarchy/4d_cbct_mc/4d/cirs/for_mc/4d_cirs_large_with_water/cirs_phase_02.pkl --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/4d/cirs/for_mc/4d_cirs_large_with_water/cirs_correspondence_model.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/4d/cirs/for_mc/4d_cirs_large_with_water/cirs_varian_respiratory_signal.pkl --respiratory-signal-quantization 20 --cirs-phantom --reconstruct --forward-projection
-
-
-
-4D patient runs:
-run-mc --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d --phases 2  --gpu 0 --gpu 1 --gpu 2 --gpu 4 --gpu 5 --reference --speedups 20 --speedups 10  --regex 024.* --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model_nonmasked.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --reconstruct --forward-projection --respiratory-signal-quantization 20
-
-run-mc --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d_2 --phases 2  --gpu 1 --gpu 0 --speedups 20 --speedups 10  --regex 024.* --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model_nonmasked.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --reconstruct --forward-projection --respiratory-signal-quantization 20
-
-run-mc --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025 --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc --phases 2  --gpu 5 --gpu 0 --gpu 1 --gpu 2 --gpu 4  --reference --speedups 20 --speedups 10  --regex ct_rai* --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/correspondence_model_rai.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/cbct_respiratory_signal.pkl --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --reconstruct --forward-projection --respiratory-signal-quantization 20
-run-mc --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025 --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc --phases 2  --gpu 0 --gpu 1 --gpu 2 --speedups 20  --regex ct_rai* --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/correspondence_model_rai.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/cbct_respiratory_signal.pkl --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --reconstruct --forward-projection --respiratory-signal-quantization 20
+### 3D CBCT simulation
+A 3D CBCT simulation is defined by the static (patient) geometry and the moving CBCT scan geometry (i.e. X-ray source and detector).
 
 
 
-debug: run-mc --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025 --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/debug --phases 2  --gpu 1 --gpu 0 --reference  --regex ct_rai* --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/correspondence_model.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/cbct_respiratory_signal.pkl --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --reconstruct --forward-projection --n-projections 1 --respiratory-signal-quantization 20
+### 4D CBCT simulation
+Analog to the 3D CBCT simulation, a 4D CBCT simulation is defined by the time-resolved/dynamic (patient) geometry and the moving CBCT scan geometry (i.e. X-ray source and detector). In addition, a 4D CBCT simulation requires a correspondence model and a respiratory signal.
+
+#### Correspondence model
+The correspondence model can be fitted using a 4D CT and the corresponding respiratory signal.
+If no respiratory signal is available, the lung volume can be used as a surrogate signal.
+The correspondence model is readily fitted by the following code snippet:
+
+```python
+import numpy as np
+from cbctmc.registration.correspondence import CorrespondenceModel
+
+images: np.ndarray
+masks: np.ndarray
+timepoints: np.ndarray
+
+
+model = CorrespondenceModel.build_default(
+    images=images,
+    masks=masks,
+    timepoints=timepoints,
+    masked_registration=False,
+    device="cuda:0",
+)
+model.save("/some/folder/correspondence_model.pkl")
+```
