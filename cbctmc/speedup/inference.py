@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 import time
 from math import ceil
+from pathlib import Path
 from typing import Tuple
 
+import itk
 import numpy as np
 import torch
 from ipmi.common.logger import init_fancy_logging
@@ -39,7 +41,7 @@ class MCSpeedup(ForwardPassMixin):
     def _cast_to_numpy(self, data: torch.Tensor) -> np.ndarray:
         return data.detach().cpu().numpy()
 
-    def execute(
+    def _execute(
         self,
         low_photon: ArrayOrTensor,
         forward_projection: ArrayOrTensor | None = None,
@@ -80,6 +82,55 @@ class MCSpeedup(ForwardPassMixin):
         torch.cuda.empty_cache()
 
         return mean, variance, sample
+
+    @staticmethod
+    def _load_image(filepath: PathLike) -> Tuple[np.ndarray, dict]:
+        image = itk.imread(filepath)
+        spacing = image.GetSpacing()
+        origin = image.GetOrigin()
+        direction = image.GetDirection()
+
+        image = itk.array_from_image(image)
+
+        meta = {
+            "spacing": spacing,
+            "origin": origin,
+            "direction": direction,
+        }
+
+        return image, meta
+
+    def execute(
+        self,
+        low_photon: ArrayOrTensor | PathLike,
+        forward_projection: ArrayOrTensor | PathLike | None = None,
+        batch_size: int = 16,
+    ):
+        if isinstance(low_photon, np.ndarray):
+            return self._execute(
+                low_photon=low_photon,
+                forward_projection=forward_projection,
+                batch_size=batch_size,
+            )
+        else:
+            low_photon_filepath = Path(low_photon)
+            forward_projection_filepath = Path(forward_projection)
+            low_photon, meta = self._load_image(low_photon_filepath)
+            if forward_projection is not None:
+                forward_projection, _ = self._load_image(forward_projection_filepath)
+
+            mean, variance, sample = self._execute(
+                low_photon=low_photon,
+                forward_projection=forward_projection,
+                batch_size=batch_size,
+            )
+
+            sample = itk.image_from_array(sample)
+            sample.SetSpacing(meta["spacing"])
+            sample.SetOrigin(meta["origin"])
+            sample.SetDirection(meta["direction"])
+
+            return sample
 
     @staticmethod
     def preprocess_inputs(

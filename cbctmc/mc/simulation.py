@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+from multiprocessing.pool import Pool, ThreadPool
 from pathlib import Path
 from typing import Sequence, Tuple
 
@@ -94,12 +95,14 @@ class BaseMCSimulation:
     def _prepare_simulation(
         self,
         output_folder: PathLike,
+        geometry_output_folder: PathLike,
         output_suffix: str = "",
         gpu_ids: Sequence[int] | int = 0,
         force_rerun: bool = False,
         force_geometry_recompile: bool = False,
     ) -> Path | None:
         output_folder = Path(output_folder)
+        geometry_output_folder = Path(geometry_output_folder)
         gpu_ids = (gpu_ids,) if isinstance(gpu_ids, int) else gpu_ids
 
         logger.debug(f"Running simulation on {len(gpu_ids)} GPUs: {gpu_ids}")
@@ -108,19 +111,21 @@ class BaseMCSimulation:
             output_folder.mkdir(parents=True)
 
         input_filepath = output_folder / f"input{output_suffix}.in"
-        geometry_filepath = output_folder / f"geometry{output_suffix}.vox.gz"
+        geometry_filepath = geometry_output_folder / f"geometry{output_suffix}.vox.gz"
 
         if not geometry_filepath.exists() or force_geometry_recompile:
-            # TODO: check via hash
+            logger.info("Compile geometry and safe to folder {geometry_output_folder}")
             self.geometry.save_mcgpu_geometry(geometry_filepath)
 
-        self.geometry.save_material_segmentation(
-            output_folder / f"geometry_materials{output_suffix}.nii.gz"
-        )
-        self.geometry.save_density_image(
-            output_folder / f"geometry_densities{output_suffix}.nii.gz"
-        )
-        self.geometry.save(output_folder / f"geometry{output_suffix}.pkl.gz")
+            self.geometry.save_material_segmentation(
+                geometry_output_folder / f"geometry_materials{output_suffix}.nii.gz"
+            )
+            self.geometry.save_density_image(
+                geometry_output_folder / f"geometry_densities{output_suffix}.nii.gz"
+            )
+            self.geometry.save(
+                geometry_output_folder / f"geometry{output_suffix}.pkl.gz"
+            )
 
         image_size = self.geometry.image_size
 
@@ -365,6 +370,7 @@ class MCSimulation(BaseMCSimulation):
     def run_simulation(
         self,
         output_folder: PathLike,
+        geometry_output_folder: PathLike | None = None,
         output_suffix: str = "",
         run_air_simulation: bool = True,
         air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
@@ -375,6 +381,8 @@ class MCSimulation(BaseMCSimulation):
         force_geometry_recompile: bool = False,
         dry_run: bool = False,
     ):
+        if not geometry_output_folder:
+            geometry_output_folder = output_folder
         if dry_run:
             logger.info("Entering dry run mode. Skipping MC simulation.")
 
@@ -393,6 +401,7 @@ class MCSimulation(BaseMCSimulation):
         # the docker container
         input_filepath = self._prepare_simulation(
             output_folder,
+            geometry_output_folder=geometry_output_folder,
             gpu_ids=gpu_ids,
             force_rerun=force_rerun,
             force_geometry_recompile=force_geometry_recompile,
@@ -461,25 +470,66 @@ class MCSimulation4D:
         # check if projections are already present
         return (output_folder / "projections_total.mha").is_file()
 
-    def _warp_geometry(self, signal: float, dt_signal: float) -> MCGeometry:
+    def _warp_geometry(
+        self, signal: float, dt_signal: float, device: str = "cpu"
+    ) -> MCGeometry:
         logger.debug(f"warp geometry for {signal=} and {dt_signal=}")
         vector_field = self.correspondence_model.predict(np.array([signal, dt_signal]))
-        return self.geometry.warp(vector_field=vector_field, device="cpu")
+        return self.geometry.warp(vector_field=vector_field, device=device)
 
     def _warp_and_save_geometry(
         self,
-        signals: np.ndarray,
-        dt_signals: np.ndarray,
+        signal: float,
+        dt_signal: float,
         output_folder: PathLike,
-        n_workers: int = 1,
     ):
-        pass
+        unique_signal_hash = hashlib.sha256(
+            np.array([signal, dt_signal], dtype=np.float32).tobytes()
+        ).hexdigest()[:7]
+        output_suffix = f"_{unique_signal_hash}"
+        logger.debug(f"Precompile geometry for {signal=} and {dt_signal=}")
+        warped_geometry = self._warp_geometry(signal, dt_signal)
+
+        output_folder = Path(output_folder)
+        warped_geometry.save_mcgpu_geometry(
+            output_folder / f"geometry{output_suffix}.vox.gz"
+        )
+
+        warped_geometry.save_material_segmentation(
+            output_folder / f"geometry_materials{output_suffix}.nii.gz"
+        )
+        warped_geometry.save_density_image(
+            output_folder / f"geometry_densities{output_suffix}.nii.gz"
+        )
+        warped_geometry.save(output_folder / f"geometry{output_suffix}.pkl.gz")
+
+    def _precompile_geometries(
+        self,
+        unique_signals: Sequence[Tuple[float, float]],
+        output_folder: PathLike,
+        n_workers: int = 8,
+    ):
+        output_folder = Path(output_folder)
+        results = []
+        with ThreadPool(n_workers) as pool:
+            for signal, dt_signal in unique_signals:
+                result = pool.apply_async(
+                    self._warp_and_save_geometry,
+                    kwds={
+                        "signal": signal,
+                        "dt_signal": dt_signal,
+                        "output_folder": output_folder,
+                    },
+                )
+                results.append(result)
+            [result.get() for result in results]
 
     def run_simulation(
         self,
         respiratory_signal: RespiratorySignal,
         respiratory_signal_quantization: int | None,
         output_folder: PathLike,
+        geometry_output_folder: PathLike | None,
         run_air_simulation: bool = True,
         air_projection_denoise_kernel_size: Tuple[int, int] | None = (10, 10),
         clean: bool = True,
@@ -487,9 +537,12 @@ class MCSimulation4D:
         gpu_ids: Sequence[int] | int = 0,
         force_rerun: bool = False,
         force_geometry_recompile: bool = False,
+        precompile_geometries: bool = False,
         dry_run: bool = False,
     ):
         output_folder = Path(output_folder)
+        if not geometry_output_folder:
+            geometry_output_folder = output_folder
 
         # check if already simulated
         if self._already_simulated(output_folder) and not force_rerun:
@@ -500,6 +553,7 @@ class MCSimulation4D:
             return
 
         output_folder.mkdir(parents=True, exist_ok=True)
+        geometry_output_folder.mkdir(parents=True, exist_ok=True)
         # resample respiratory signal to match frame rate of CBCT scan
         # then the signal index corresponds to the projection index
         respiratory_signal = respiratory_signal.resample(self.frame_rate)
@@ -546,6 +600,13 @@ class MCSimulation4D:
         )
         logger.info(f"Unique signals: {len(unique_signals)}")
 
+        if precompile_geometries:
+            self._precompile_geometries(
+                unique_signals=unique_signals,
+                output_folder=geometry_output_folder,
+                n_workers=8,
+            )
+
         # run one air simulation for all following simulations
         MCSimulation.run_air_simulation(output_folder, gpu_ids=gpu_ids, dry_run=dry_run)
 
@@ -566,9 +627,18 @@ class MCSimulation4D:
             unique_signal_hash = hashlib.sha256(
                 np.array([signal, dt_signal], dtype=np.float32).tobytes()
             ).hexdigest()[:7]
-
             output_suffix = f"_{unique_signal_hash}"
-            warped_geometry = self._warp_geometry(signal, dt_signal)
+
+            if (
+                warped_geometry_filepath := (
+                    geometry_output_folder / f"geometry{output_suffix}.pkl.gz"
+                )
+            ).is_file():
+                # load warped geometry from file as it has been already computed
+                warped_geometry = MCGeometry.load(warped_geometry_filepath)
+
+            else:
+                warped_geometry = self._warp_geometry(signal, dt_signal)
 
             projection_angles = [
                 start_angle + i_projection * self.angle_between_projections
@@ -609,6 +679,7 @@ class MCSimulation4D:
             )
             simulation.run_simulation(
                 output_folder=output_folder,
+                geometry_output_folder=geometry_output_folder,
                 run_air_simulation=False,
                 air_projection_denoise_kernel_size=air_projection_denoise_kernel_size,
                 clean=False,

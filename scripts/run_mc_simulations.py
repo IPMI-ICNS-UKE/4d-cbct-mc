@@ -16,14 +16,14 @@ from ipmi.common.logger import init_fancy_logging
 from torch import nn
 
 from cbctmc.mc.respiratory import RespiratorySignal
-from cbctmc.reconstruction.reconstruction import reconstruct_3d, reconstruct_4d
+from cbctmc.reconstruction import reconstruction
 from cbctmc.registration.correspondence import CorrespondenceModel
-from cbctmc.utils import get_asset_filepath, get_folders_by_regex
+from cbctmc.speedup.inference import MCSpeedup
+from cbctmc.utils import get_asset_filepath
 
 # order GPU ID by PCI bus ID
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
-import faulthandler
 
 import itk
 
@@ -40,147 +40,221 @@ from cbctmc.mc.geometry import MCCatPhan604Geometry, MCCIRSPhantomGeometry, MCGe
 from cbctmc.mc.simulation import MCSimulation, MCSimulation4D
 from cbctmc.segmentation.labels import LABELS
 from cbctmc.segmentation.segmenter import MCSegmenter
-from cbctmc.segmentation.utils import (
-    merge_upper_body_bone_segmentations,
-    merge_upper_body_fat_segmentations,
-    merge_upper_body_muscle_segmentations,
-)
 from cbctmc.speedup.models import FlexUNet
 
-faulthandler.enable()
+
+def _reconstruct_mc_simulation(
+    simulation_folder,
+    config_name,
+    gpu_id: int,
+    reconstruct_3d: bool,
+    reconstruct_4d: bool,
+    suffix: str,
+    logger,
+):
+    """Wrapper function for reconstructing a single MC simulation."""
+    if reconstruct_3d:
+        logger.info("Reconstruct 3D simulation")
+        reconstruction.reconstruct_3d(
+            projections_filepath=(
+                simulation_folder
+                / config_name
+                / f"projections_total_normalized{suffix}.mha"
+            ),
+            geometry_filepath=simulation_folder / "geometry.xml",
+            output_folder=(simulation_folder / config_name / "reconstructions"),
+            output_filename=f"fdk3d_wpc{suffix}.mha",
+            dimension=(464, 250, 464),
+            water_pre_correction=ReconDefaults.wpc_catphan604,
+            gpu_id=gpu_id,
+        )
+
+    if reconstruct_4d:
+        logger.info("Reconstruct 4D simulation")
+
+        signal = np.loadtxt(simulation_folder / config_name / "signal.txt")
+        reconstruction.reconstruct_4d(
+            amplitude_signal=signal[:, 0],
+            projections_filepath=(
+                simulation_folder
+                / config_name
+                / f"projections_total_normalized{suffix}.mha"
+            ),
+            geometry_filepath=simulation_folder / "geometry.xml",
+            output_folder=(simulation_folder / config_name / "reconstructions"),
+            output_filename=f"rooster4d_wpc{suffix}.mha",
+            dimension=(464, 250, 464),
+            water_pre_correction=ReconDefaults.wpc_catphan604,
+            gpu_id=gpu_id,
+        )
 
 
 @click.command()
 @click.option(
-    "--data-folder",
-    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    "--image-filepath",
+    type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
     default=None,
-)
-@click.option(
-    "--regex",
-    type=str,
-    default=".*",
+    show_default=True,
+    help="CT image to use for simulation",
 )
 @click.option(
     "--geometry-filepath",
     type=click.Path(file_okay=True, dir_okay=False, path_type=Path),
     default=None,
+    show_default=True,
+    help="Geometry to use for simulation. Can be provided instead of CT image.",
 )
 @click.option(
     "--output-folder",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    show_default=True,
+    help="Output folder for simulation results",
+)
+@click.option(
+    "--simulation-name",
+    type=str,
+    default=None,
+    show_default=True,
+    help="Name of the simulation. If not provided, the name is derived from the image filepath.",
 )
 @click.option(
     "--gpu",
-    help="GPU PCI bus ID to use for simulation",
     type=int,
     default=(0,),
     multiple=True,
     show_default=True,
+    help="GPU PCI bus ID to use for simulation (can be checked with nvidia-smi)",
 )
-@click.option("--reference", is_flag=True)
+@click.option("--reference", is_flag=True, help="Enable reference simulation")
 @click.option(
     "--reference-n-histories",
     type=click.INT,
     default=MCDefaults.n_histories,
+    show_default=True,
+    help="Number of histories for reference simulation",
 )
 @click.option(
     "--speedups",
     type=float,
     multiple=True,
     default=[],
+    show_default=True,
+    help="Speedup factors for simulation",
 )
 @click.option(
-    "--phases",
-    type=int,
-    multiple=True,
-    default=[0],
+    "--speedup-weights",
+    type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
+    default=None,
+    show_default=True,
+    help="Weights file for speedup model",
 )
 @click.option(
     "--segmenter-weights",
     type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
+    help="Weights file for the segmenter model",
 )
 @click.option(
     "--segmenter-patch-shape",
     type=click.Tuple([int, int, int]),
     default=(256, 256, 128),
+    show_default=True,
+    help="Patch shape for the segmenter model",
 )
 @click.option(
     "--segmenter-patch-overlap",
     type=click.FloatRange(0.0, 1.0, min_open=True, max_open=False),
     default=0.50,
+    show_default=True,
+    help="Overlap ratio for patch-based segmentation",
 )
 @click.option(
     "--n-projections",
     type=int,
     default=MCDefaults.n_projections,
+    show_default=True,
+    help="Number of projections for simulation",
 )
-@click.option("--reconstruct", is_flag=True)
-@click.option("--forward-projection", is_flag=True)
-@click.option("--no-clean", is_flag=True)
+@click.option("--reconstruct-3d", is_flag=True, help="Enable 3D reconstruction")
+@click.option("--reconstruct-4d", is_flag=True, help="Enable 4D reconstruction")
+@click.option("--forward-projection", is_flag=True, help="Enable forward projection")
+@click.option("--no-clean", is_flag=True, help="Disable cleaning of intermediate files")
 @click.option(
     "--correspondence-model",
     type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
     default=None,
+    show_default=True,
+    help="Correspondence model file. Must be provided for 4D simulation.",
 )
 @click.option(
     "--respiratory-signal",
     type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
     default=None,
+    show_default=True,
+    help="Respiratory signal file. Must be provided for 4D simulation.",
 )
 @click.option(
     "--respiratory-signal-quantization",
     type=int,
     default=None,
+    show_default=True,
+    help="Quantization level for respiratory signal. A lower value means that the respiratory signal is more coarse.",
 )
 @click.option(
     "--respiratory-signal-scaling",
     type=float,
     default=1.0,
+    show_default=True,
+    help="Scaling factor for respiratory signal",
 )
 @click.option(
-    "--cirs-phantom",
+    "--precompile-geometries",
     is_flag=True,
+    help="Precompile geometries for 4D simulation",
+)
+@click.option("--cirs-phantom", is_flag=True, help="Use CIRS phantom for simulation")
+@click.option(
+    "--catphan-phantom", is_flag=True, help="Use Catphan604 phantom for simulation"
 )
 @click.option(
-    "--catphan-phantom",
-    is_flag=True,
-)
-@click.option(
-    "--dry-run",
-    is_flag=True,
+    "--dry-run", is_flag=True, help="Perform a dry run without executing the simulation"
 )
 @click.option(
     "--random-seed",
     type=int,
     default=42,
+    show_default=True,
+    help="Random seed for simulation",
 )
 @click.option(
     "--loglevel",
     type=click.Choice(["debug", "info", "warning", "error", "critical"]),
     default="info",
+    show_default=True,
+    help="Logging level",
 )
 def run(
-    data_folder: Path | None,
-    regex: str | None,
+    image_filepath: Path | None,
     geometry_filepath: Path | None,
     output_folder: Path,
+    simulation_name: str | None,
     gpu: Sequence[int],
     reference: bool,
     reference_n_histories: int,
-    phases: List[int],
     speedups: List[int],
+    speedup_weights: Path | None,
     segmenter_weights: Path,
     segmenter_patch_shape: Tuple[int, int, int],
     segmenter_patch_overlap: float,
     n_projections: int,
-    reconstruct: bool,
+    reconstruct_3d: bool,
+    reconstruct_4d: bool,
     forward_projection: bool,
     no_clean: bool,
     correspondence_model: Path | None,
     respiratory_signal: Path | None,
     respiratory_signal_quantization: int | None,
     respiratory_signal_scaling: float,
+    precompile_geometries: bool,
     cirs_phantom: bool,
     catphan_phantom: bool,
     dry_run: bool,
@@ -214,28 +288,28 @@ def run(
         }
     )
     if not CONFIGS:
-        logger.warning(
+        raise ValueError(
             "No simulation configs specified. "
             "Please use --reference and/or --speedups to specify runs"
         )
-        return
 
     is_4d = correspondence_model is not None and respiratory_signal is not None
     if is_4d:
         mc_simulation_class = MCSimulation4D
-        logger.info(f"This is a 4D simulation, thus using {mc_simulation_class}")
+        logger.info(
+            f"This is a 4D simulation, thus using {mc_simulation_class.__name__}"
+        )
         logger.info(f"Load correspondence model from {correspondence_model}")
         correspondence_model = CorrespondenceModel.load(correspondence_model)
+        logger.info(
+            f"Correspondece model reference phase is "
+            f"{correspondence_model.reference_phase}. "
+            f"Please make sure that you load the correct CT phase image or "
+            f"corresponding geometry."
+        )
+
         logger.info(f"Load respiratory signal from {respiratory_signal}")
         respiratory_signal = RespiratorySignal.load(respiratory_signal)
-
-        if phases != (correspondence_model.reference_phase,):
-            logger.warning(
-                f"Phases {phases} do not match "
-                f"{correspondence_model.reference_phase=}. Overwrite phases to "
-                f"{[correspondence_model.reference_phase]}"
-            )
-            phases = [correspondence_model.reference_phase]
 
         if respiratory_signal_scaling != 1:
             logger.info(
@@ -250,7 +324,9 @@ def run(
     else:
         # 3D MC simulation, i.e. no correspondence model and no respiratory signal
         mc_simulation_class = MCSimulation
-        logger.info(f"This is a 3D simulation, thus using {mc_simulation_class}")
+        logger.info(
+            f"This is a 3D simulation, thus using {mc_simulation_class.__name__}"
+        )
         respiratory_signal = None
 
     logger.info(f"Simulation configs: {CONFIGS}")
@@ -294,122 +370,133 @@ def run(
     else:
         geometry_class = MCGeometry
 
-    if geometry_filepath:
-        patients = [Path(geometry_filepath).parent]
-    else:
-        patients = sorted(get_folders_by_regex(data_folder, regex=regex))
+    image_folder = image_filepath.parent
 
-    logger.info(
-        f"Found {len(patients)} patients using "
-        f"data folder {data_folder} and regex pattern {regex}"
+    logger.info(f"Prepare simulation for image {image_filepath}")
+
+    if not simulation_name:
+        simulation_name = f"{image_folder.name}_{image_filepath.stem}"
+    simulation_folder = output_folder / simulation_name
+    simulation_folder.mkdir(parents=True, exist_ok=True)
+
+    geometry = None
+    if geometry_filepath is not None:
+        logger.info(f"Load geometry from {geometry_filepath}")
+
+        geometry = geometry_class.load(geometry_filepath)
+        geometry.save_material_segmentation(
+            simulation_folder / "geometry_materials.nii.gz"
+        )
+        geometry.save_density_image(simulation_folder / "geometry_densities.nii.gz")
+        geometry.save(simulation_folder / "geometry.pkl.gz")
+
+    geometry_already_prepared = all(
+        (
+            (simulation_folder / "geometry_materials.nii.gz").exists(),
+            (simulation_folder / "geometry_densities.nii.gz").exists(),
+            (simulation_folder / "geometry.pkl.gz").exists(),
+        )
     )
 
-    for patient_folder in patients:
-        for phase in phases:
-            logger.info(
-                f"Prepare simulation for patient {patient_folder.name} and phase {phase}"
+    logger.info(f"Geometry already prepared: {geometry_already_prepared}")
+
+    if not geometry_already_prepared:
+        if segmenter is None:
+            raise ValueError(
+                "Segmenter is None, thus geometry has to be provided "
+                "via --geometry-filepath"
             )
-            simulation_folder = (
-                output_folder / patient_folder.name / f"phase_{phase:02d}"
-            )
-            simulation_folder.mkdir(parents=True, exist_ok=True)
-
-            geometry = None
-            if geometry_filepath is not None:
-                logger.info(f"Load geometry from {geometry_filepath}")
-
-                geometry = geometry_class.load(geometry_filepath)
-                geometry.save_material_segmentation(
-                    simulation_folder / "geometry_materials.nii.gz"
-                )
-                geometry.save_density_image(
-                    simulation_folder / "geometry_densities.nii.gz"
-                )
-                geometry.save(simulation_folder / "geometry.pkl.gz")
-            else:
-                possible_extensions = [".nii", ".nii.gz"]
-                possible_image_names = ["bin", "phase"]
-
-                for extension, image_name in product(
-                    possible_extensions, possible_image_names
-                ):
-                    image_filepath = (
-                        patient_folder / f"{image_name}_{phase:02d}{extension}"
-                    )
-                    if image_filepath.exists():
-                        break
-                else:
-                    raise ValueError(
-                        f"Could not find image for phase {phase} in {patient_folder}"
-                    )
-
-            geometry_already_prepared = all(
-                (
-                    (simulation_folder / "geometry_materials.nii.gz").exists(),
-                    (simulation_folder / "geometry_densities.nii.gz").exists(),
-                    (simulation_folder / "geometry.pkl.gz").exists(),
-                )
+        else:
+            logger.info("Create geometry using segmentator")
+            # use segmenter
+            geometry = geometry_class.from_image(
+                image_filepath=image_filepath,
+                segmenter=segmenter,
+                image_spacing=(1.0, 1.0, 1.0),
             )
 
-            logger.info(f"Geometry already prepared: {geometry_already_prepared}")
+        geometry.save_material_segmentation(
+            simulation_folder / "geometry_materials.nii.gz"
+        )
+        geometry.save_density_image(simulation_folder / "geometry_densities.nii.gz")
+        geometry.save(simulation_folder / "geometry.pkl.gz")
+    elif geometry is None:
+        geometry = MCGeometry.load(simulation_folder / "geometry.pkl.gz")
 
-            if not geometry_already_prepared:
-                if segmenter is None:
-                    segmentation_folder = (
-                        patient_folder / f"segmentations/phase_{phase:02d}"
-                    )
-                    logger.info("Create geometry using existing segmentations")
-                    # use TotalSegmentator segmentations
+    fp_geometry = create_geometry(start_angle=90, n_projections=n_projections)
+    save_geometry(fp_geometry, simulation_folder / "geometry.xml")
+    if forward_projection and not (simulation_folder / "density_fp.mha").exists():
+        logger.info("Perform forward projection")
+        image = prepare_image_for_rtk(
+            image=geometry.densities,
+            image_spacing=geometry.image_spacing,
+            input_value_range=None,
+            output_value_range=None,
+        )
+        density_forward_projection = project_forward(
+            image,
+            geometry=fp_geometry,
+            detector_size=MCDefaults.n_detector_pixels_half_fan,
+            detector_pixel_spacing=MCDefaults.detector_pixel_size,
+        )
+        itk.imwrite(
+            density_forward_projection,
+            str(simulation_folder / "density_fp.mha"),
+        )
 
-                    if not (patient_folder / "body.nii.gz").exists():
-                        merge_upper_body_bone_segmentations(segmentation_folder)
-                        merge_upper_body_muscle_segmentations(segmentation_folder)
-                        merge_upper_body_fat_segmentations(segmentation_folder)
+    for config_name, config in CONFIGS.items():
+        logger.info(
+            f"Run simulation with config {config_name} " f"for image {image_filepath}"
+        )
 
-                    geometry = geometry_class.from_image(
-                        image_filepath=image_filepath,
-                        body_segmentation_filepath=segmentation_folder / "body.nii.gz",
-                        bone_segmentation_filepath=segmentation_folder
-                        / "upper_body_bones.nii.gz",
-                        muscle_segmentation_filepath=segmentation_folder
-                        / "upper_body_muscles.nii.gz",
-                        fat_segmentation_filepath=segmentation_folder
-                        / "upper_body_fat.nii.gz",
-                        liver_segmentation_filepath=segmentation_folder
-                        / "liver.nii.gz",
-                        stomach_segmentation_filepath=segmentation_folder
-                        / "stomach.nii.gz",
-                        lung_segmentation_filepath=segmentation_folder / "lung.nii.gz",
-                        lung_vessel_segmentation_filepath=segmentation_folder
-                        / "lung_vessels.nii.gz",
-                    )
-                else:
-                    logger.info("Create geometry using segmentator")
-                    # use segmetator
-                    geometry = geometry_class.from_image(
-                        image_filepath=image_filepath,
-                        segmenter=segmenter,
-                        image_spacing=(1.0, 1.0, 1.0),
-                    )
+        additional_run_kwargs = {}
+        if is_4d:
+            additional_run_kwargs["respiratory_signal"] = respiratory_signal
+            additional_run_kwargs[
+                "respiratory_signal_quantization"
+            ] = respiratory_signal_quantization
+            additional_run_kwargs["geometry_output_folder"] = (
+                simulation_folder
+                / f"4d_geometries_{correspondence_model.model_hash[:7]}"
+            )
+            additional_run_kwargs["precompile_geometries"] = precompile_geometries
 
-                geometry.save_material_segmentation(
-                    simulation_folder / "geometry_materials.nii.gz"
+        simulation = mc_simulation_class(geometry=geometry, **config)
+        simulation.run_simulation(
+            output_folder=simulation_folder / config_name,
+            run_air_simulation=True,
+            clean=not no_clean,
+            gpu_ids=gpu,
+            force_rerun=False,
+            dry_run=dry_run,
+            **additional_run_kwargs,
+        )
+
+        if not dry_run and is_4d and forward_projection:
+            logger.info("Perform 4D forward projection")
+
+            with open(
+                simulation_folder / config_name / "projection_geometries.yaml",
+                "rt",
+            ) as f:
+                logger.info("Load used projection geometries")
+                projection_geometries = yaml.safe_load(f)
+            forward_projections = []
+            for projection_angle, meta in projection_geometries.items():
+                # perform 4D forward projection using warped geometries
+                fp_geometry = create_geometry(
+                    start_angle=projection_angle - 180.0, n_projections=1
                 )
-                geometry.save_density_image(
-                    simulation_folder / "geometry_densities.nii.gz"
-                )
-                geometry.save(simulation_folder / "geometry.pkl.gz")
-            else:
-                if geometry is None:
-                    geometry = MCGeometry.load(simulation_folder / "geometry.pkl.gz")
 
-            fp_geometry = create_geometry(start_angle=90, n_projections=n_projections)
-            save_geometry(fp_geometry, simulation_folder / "geometry.xml")
-            if (
-                forward_projection
-                and not (simulation_folder / "density_fp.mha").exists()
-            ):
-                logger.info("Perform forward projection")
+                logger.debug(
+                    "Perform 4D forward projection for angle "
+                    f"{projection_angle} and "
+                    f"geometry {meta['geometry_filename']}"
+                )
+                geometry = geometry_class.load(
+                    additional_run_kwargs["geometry_output_folder"]
+                    / meta["geometry_filename"]
+                )
                 image = prepare_image_for_rtk(
                     image=geometry.densities,
                     image_spacing=geometry.image_spacing,
@@ -420,193 +507,91 @@ def run(
                     image,
                     geometry=fp_geometry,
                     detector_size=MCDefaults.n_detector_pixels_half_fan,
-                    detector_pixel_spacing=MCDefaults.detector_pixel_size,
+                    detector_pixel_spacing=VarianDefaults.detector_pixel_size,
                 )
-                itk.imwrite(
-                    density_forward_projection,
-                    str(simulation_folder / "density_fp.mha"),
+                density_forward_projection = itk.array_from_image(
+                    density_forward_projection
                 )
+                forward_projections.append(density_forward_projection[0])
 
-            for config_name, config in CONFIGS.items():
-                logger.info(
-                    f"Run simulation with config {config_name} "
-                    f"for patient {patient_folder.name} and phase {phase}"
+            forward_projections = np.stack(forward_projections, axis=0)
+            forward_projections = itk.image_from_array(forward_projections)
+            forward_projections.SetSpacing(
+                [
+                    MCDefaults.detector_pixel_size[0],
+                    MCDefaults.detector_pixel_size[1],
+                    1.0,
+                ]
+            )
+            forward_projections.SetOrigin(
+                [
+                    -0.5
+                    * MCDefaults.n_detector_pixels_half_fan[0]
+                    * MCDefaults.detector_pixel_size[0],
+                    -0.5
+                    * MCDefaults.n_detector_pixels_half_fan[1]
+                    * MCDefaults.detector_pixel_size[1],
+                    0.0,
+                ]
+            )
+            itk.imwrite(
+                forward_projections,
+                str(simulation_folder / config_name / "density_fp_4d.mha"),
+            )
+
+        perform_speedup = speedup_weights.exists() and forward_projection
+        if not dry_run and perform_speedup:
+            logger.info(
+                f"Perform simulation speedup. Load speedup model from {speedup_weights}"
+            )
+            speedup = MCSpeedup.from_filepath(
+                model_filepath=speedup_weights,
+                device=f"cuda:{gpu[0]}",
+            )
+            low_photon_projections_filepath = (
+                simulation_folder / config_name / "projections_total_normalized.mha"
+            )
+            if is_4d:
+                forward_projection_filepath = (
+                    simulation_folder / config_name / "density_fp_4d.mha"
                 )
+            else:
+                forward_projection_filepath = simulation_folder / "density_fp.mha"
+            speedup_projections = speedup.execute(
+                low_photon=low_photon_projections_filepath,
+                forward_projection=forward_projection_filepath,
+            )
+            speedup_projections_filepath = (
+                simulation_folder
+                / config_name
+                / "projections_total_normalized_speedup.mha"
+            )
+            itk.imwrite(speedup_projections, str(speedup_projections_filepath))
 
-                additional_run_kwargs = {}
-                if is_4d:
-                    additional_run_kwargs["respiratory_signal"] = respiratory_signal
-                    additional_run_kwargs[
-                        "respiratory_signal_quantization"
-                    ] = respiratory_signal_quantization
+        if not dry_run:
+            reconstruct_4d = is_4d and reconstruct_4d
 
-                simulation = mc_simulation_class(geometry=geometry, **config)
-                simulation.run_simulation(
-                    output_folder=simulation_folder / config_name,
-                    run_air_simulation=True,
-                    clean=not no_clean,
-                    gpu_ids=gpu,
-                    force_rerun=False,
-                    dry_run=dry_run,
-                    **additional_run_kwargs,
+            _reconstruct_mc_simulation(
+                simulation_folder=simulation_folder,
+                config_name=config_name,
+                gpu_id=gpu[0],
+                reconstruct_3d=reconstruct_3d,
+                reconstruct_4d=reconstruct_4d,
+                suffix="",
+                logger=logger,
+            )
+
+            if perform_speedup:
+                _reconstruct_mc_simulation(
+                    simulation_folder=simulation_folder,
+                    config_name=config_name,
+                    gpu_id=gpu[0],
+                    reconstruct_3d=reconstruct_3d,
+                    reconstruct_4d=reconstruct_4d,
+                    suffix="_speedup",
+                    logger=logger,
                 )
-
-                if not dry_run and is_4d and forward_projection:
-                    logger.info("Perform 4D forward projection")
-
-                    with open(
-                        simulation_folder / config_name / "projection_geometries.yaml",
-                        "rt",
-                    ) as f:
-                        logger.info("Load used projection geometries")
-                        projection_geometries = yaml.safe_load(f)
-                    forward_projections = []
-                    for projection_angle, meta in projection_geometries.items():
-                        # perform 4D forward projection using warped geometries
-                        fp_geometry = create_geometry(
-                            start_angle=projection_angle - 180.0, n_projections=1
-                        )
-
-                        logger.debug(
-                            "Perform 4D forward projection for angle "
-                            f"{projection_angle} and "
-                            f"geometry {meta['geometry_filename']}"
-                        )
-                        geometry = geometry_class.load(
-                            simulation_folder / config_name / meta["geometry_filename"]
-                        )
-                        image = prepare_image_for_rtk(
-                            image=geometry.densities,
-                            image_spacing=geometry.image_spacing,
-                            input_value_range=None,
-                            output_value_range=None,
-                        )
-                        density_forward_projection = project_forward(
-                            image,
-                            geometry=fp_geometry,
-                            detector_size=MCDefaults.n_detector_pixels_half_fan,
-                            detector_pixel_spacing=VarianDefaults.detector_pixel_size,
-                        )
-                        density_forward_projection = itk.array_from_image(
-                            density_forward_projection
-                        )
-                        forward_projections.append(density_forward_projection[0])
-
-                    forward_projections = np.stack(forward_projections, axis=0)
-                    forward_projections = itk.image_from_array(forward_projections)
-                    forward_projections.SetSpacing(
-                        [
-                            MCDefaults.detector_pixel_size[0],
-                            MCDefaults.detector_pixel_size[1],
-                            1.0,
-                        ]
-                    )
-                    forward_projections.SetOrigin(
-                        [
-                            -0.5
-                            * MCDefaults.n_detector_pixels_half_fan[0]
-                            * MCDefaults.detector_pixel_size[0],
-                            -0.5
-                            * MCDefaults.n_detector_pixels_half_fan[1]
-                            * MCDefaults.detector_pixel_size[1],
-                            0.0,
-                        ]
-                    )
-                    itk.imwrite(
-                        forward_projections,
-                        str(simulation_folder / config_name / "density_fp_4d.mha"),
-                    )
-
-                if not dry_run and reconstruct:
-                    logger.info("Reconstruct simulation")
-                    if (
-                        simulation_folder
-                        / config_name
-                        / "reconstructions"
-                        / "fdk3d.mha"
-                    ).exists():
-                        logger.info("Reconstruction already exists, skip")
-                    else:
-                        reconstruct_3d(
-                            projections_filepath=(
-                                simulation_folder
-                                / config_name
-                                / "projections_total_normalized.mha"
-                            ),
-                            geometry_filepath=simulation_folder / "geometry.xml",
-                            output_folder=(
-                                simulation_folder / config_name / "reconstructions"
-                            ),
-                            output_filename="fdk3d_wpc.mha",
-                            dimension=(464, 250, 464),
-                            water_pre_correction=ReconDefaults.wpc_catphan604,
-                            gpu_id=gpu[0],
-                        )
-
-                    if is_4d:
-                        logger.info("Reconstruct 4D simulation")
-
-                        signal = np.loadtxt(
-                            simulation_folder / config_name / "signal.txt"
-                        )
-                        reconstruct_4d(
-                            amplitude_signal=signal[:, 0],
-                            projections_filepath=(
-                                simulation_folder
-                                / config_name
-                                / "projections_total_normalized.mha"
-                            ),
-                            geometry_filepath=simulation_folder / "geometry.xml",
-                            output_folder=(
-                                simulation_folder / config_name / "reconstructions"
-                            ),
-                            output_filename="rooster4d_wpc.mha",
-                            dimension=(464, 250, 464),
-                            water_pre_correction=ReconDefaults.wpc_catphan604,
-                            gpu_id=gpu[0],
-                        )
 
 
 if __name__ == "__main__":
     run()
-
-    # # for debugging
-    # run(
-    #     [
-    #         "--data-folder",
-    #         "/datalake_fast/4d_ct_lung_uke_artifact_free",
-    #         "--output-folder",
-    #         "/datalake_fast/mc_output/4d",
-    #         "--phases",
-    #         "0",
-    #         "--gpu",
-    #         "0",
-    #         "--speedups",
-    #         "20.0",
-    #         "--regex",
-    #         "024.*",
-    #         "--segmenter-weights",
-    #         "/mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth",
-    #         "--segmenter-patch-overlap",
-    #         "0.25",
-    #         "--segmenter-patch-shape",
-    #         "496",
-    #         "496",
-    #         "32",
-    #         "--correspondence-model",
-    #         "/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl",
-    #         "--respiratory-signal",
-    #         "/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl",
-    #         "--respiratory-signal-quantization",
-    #         "5",
-    #         "--reconstruct",
-    #         "--no-clean",
-    #         "--loglevel",
-    #         "debug",
-    #         "--n-projections",
-    #         "100",
-    #     ]
-    # )
-
-
-# --data-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free --output-folder /mnt/nas_io/anarchy/4d_cbct_mc/4d --phases 0 --gpu 0 --gpu 1 --gpu 2 --regex 024.* --segmenter-weights /mnt/nas_io/anarchy/4d_cbct_mc/segmenter/2023-09-21T17:18:03.218908_run_39a7956b4719411f99ddf071__step_95000.pth --segmenter-patch-overlap 0.25 --segmenter-patch-shape 496 496 32 --correspondence-model /mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model.pkl --respiratory-signal /mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl --respiratory-signal-quantization 20 --respiratory-signal-scaling 2 --reconstruct
