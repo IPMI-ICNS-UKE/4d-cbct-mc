@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
     SPEEDUP_MODES = [
         "speedup_10.00x",
-        # "speedup_20.00x",
+        "speedup_20.00x",
         # "speedup_50.00x",
     ]
 
@@ -85,7 +85,7 @@ if __name__ == "__main__":
             # )
 
             patient_folder = Path(
-                f"/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc/ct_rai/phase_02"
+                f"/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc_010lung/ct_rai/phase_02"
             )
 
             # patient_folder = Path("/mnt/nas_io/anarchy/4d_cbct_mc/4d/024_4DCT_Lunge_amplitudebased_complete/phase_02")

@@ -37,7 +37,7 @@ class RespiratorySignal:
             )
 
     @classmethod
-    def load(cls, filepath: str) -> RespiratorySignal:
+    def load(cls, filepath: PathLike) -> RespiratorySignal:
         with open(filepath, "rb") as f:
             data = pickle.load(f)
         return cls(**data)

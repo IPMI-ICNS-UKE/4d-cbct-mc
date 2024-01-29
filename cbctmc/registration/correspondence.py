@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import logging
 import pickle
+from functools import cached_property
+from hashlib import sha256
+from pathlib import Path
 from typing import Sequence
 
 import matplotlib.pyplot as plt
@@ -34,7 +37,30 @@ class CorrespondenceModel:
         self.signals: np.ndarray | None = None
         self.reference_phase: int | None = None
 
-    def save(self, filepath: PathLike):
+    @cached_property
+    def model_hash(self) -> str:
+        """Calculate a SHA256 hash of the correspondence model to uniquely
+        identify it."""
+        if not self.is_fitted:
+            raise RuntimeError("Correspondence model is not fitted")
+
+        hasher = sha256()
+        hasher.update(self.coefficients.tobytes())
+        hasher.update(self.timesteps.to_bytes())
+        hasher.update(self.mean_signal.tobytes())
+        hasher.update(self.mean_vector_field.tobytes())
+        hasher.update(self.signals.tobytes())
+        hasher.update(self.reference_phase.to_bytes())
+
+        return hasher.hexdigest()
+
+    def save(self, filepath: PathLike, include_model_hash: bool = True):
+        filepath = Path(filepath)
+        filepath = filepath.with_suffix(".pkl")
+        if include_model_hash:
+            filepath = filepath.with_name(
+                f"{filepath.stem}_{self.model_hash[:7]}{filepath.suffix}"
+            )
         with open(filepath, "wb") as f:
             pickle.dump(
                 {
@@ -331,67 +357,71 @@ class CorrespondenceModel:
 
 
 if __name__ == "__main__":
-    from pathlib import Path
-
-    import SimpleITK as sitk
-    from ipmi.common.logger import init_fancy_logging
-
-    logging.getLogger("cbctmc").setLevel(logging.DEBUG)
-    logging.getLogger("vroc").setLevel(logging.DEBUG)
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    init_fancy_logging()
-
-    image_filepaths = [
-        Path(
-            "/mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free/024_4DCT_Lunge_amplitudebased_complete"
-        )
-        / f"phase_{i:02d}.nii"
-        for i in range(10)
-    ]
-
-    mask_filepaths = [
-        Path(
-            "/mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free/024_4DCT_Lunge_amplitudebased_complete/masks"
-        )
-        / f"lung_phase_{i:02d}.nii"
-        for i in range(10)
-    ]
-
-    def read_image(filepath) -> np.ndarray:
-        image = sitk.ReadImage(str(filepath))
-        image = resample_image_spacing(
-            image, new_spacing=(1.0, 1.0, 1.0), resampler=sitk.sitkNearestNeighbor
-        )
-        image = sitk.GetArrayFromImage(image)
-        image = np.swapaxes(image, 0, 2)
-        return image
-
-    images = [read_image(image_filepath) for image_filepath in image_filepaths]
-    images = np.stack(images, axis=0)
-
-    masks = [read_image(mask_filepath) for mask_filepath in mask_filepaths]
-    masks = np.stack(masks, axis=0)
-
-    timepoints = np.linspace(0, 5, 10)
-    signal = RespiratorySignal.from_masks(
-        masks=masks,
-        timepoints=timepoints,
-        target_total_seconds=60.0,
-        target_sampling_frequency=25.0,
+    c = CorrespondenceModel.load(
+        "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/correspondence_model_rai.pkl"
     )
 
-    plt.plot(signal.time, signal.signal)
-    plt.plot(signal.time, signal.dt_signal)
-    # plt.scatter(timepoints, signal_timepoints)
-
-    signal.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl")
-
-    model = CorrespondenceModel.build_default(
-        images=images,
-        masks=masks,
-        timepoints=timepoints,
-        masked_registration=False,
-        device="cuda:0",
-    )
-    model.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model_nonmasked.pkl")
+    # from pathlib import Path
+    #
+    # import SimpleITK as sitk
+    # from ipmi.common.logger import init_fancy_logging
+    #
+    # logging.getLogger("cbctmc").setLevel(logging.DEBUG)
+    # logging.getLogger("vroc").setLevel(logging.DEBUG)
+    # logger = logging.getLogger(__name__)
+    # logger.setLevel(logging.DEBUG)
+    # init_fancy_logging()
+    #
+    # image_filepaths = [
+    #     Path(
+    #         "/mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free/024_4DCT_Lunge_amplitudebased_complete"
+    #     )
+    #     / f"phase_{i:02d}.nii"
+    #     for i in range(10)
+    # ]
+    #
+    # mask_filepaths = [
+    #     Path(
+    #         "/mnt/nas_io/anarchy/4d_cbct_mc/4d_ct_lung_uke_artifact_free/024_4DCT_Lunge_amplitudebased_complete/masks"
+    #     )
+    #     / f"lung_phase_{i:02d}.nii"
+    #     for i in range(10)
+    # ]
+    #
+    # def read_image(filepath) -> np.ndarray:
+    #     image = sitk.ReadImage(str(filepath))
+    #     image = resample_image_spacing(
+    #         image, new_spacing=(1.0, 1.0, 1.0), resampler=sitk.sitkNearestNeighbor
+    #     )
+    #     image = sitk.GetArrayFromImage(image)
+    #     image = np.swapaxes(image, 0, 2)
+    #     return image
+    #
+    # images = [read_image(image_filepath) for image_filepath in image_filepaths]
+    # images = np.stack(images, axis=0)
+    #
+    # masks = [read_image(mask_filepath) for mask_filepath in mask_filepaths]
+    # masks = np.stack(masks, axis=0)
+    #
+    # timepoints = np.linspace(0, 5, 10)
+    # signal = RespiratorySignal.from_masks(
+    #     masks=masks,
+    #     timepoints=timepoints,
+    #     target_total_seconds=60.0,
+    #     target_sampling_frequency=25.0,
+    # )
+    #
+    # plt.plot(signal.time, signal.signal)
+    # plt.plot(signal.time, signal.dt_signal)
+    # # plt.scatter(timepoints, signal_timepoints)
+    #
+    # signal.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_respiratory_signal.pkl")
+    #
+    # model = CorrespondenceModel.build_default(
+    #     images=images,
+    #     masks=masks,
+    #     timepoints=timepoints,
+    #     masked_registration=False,
+    #     device="cuda:0",
+    # )
+    # model.save("/mnt/nas_io/anarchy/4d_cbct_mc/024_correspondence_model_nonmasked.pkl")
