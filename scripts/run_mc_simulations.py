@@ -539,7 +539,10 @@ def run(
                 str(simulation_folder / config_name / "density_fp_4d.mha"),
             )
 
-        perform_speedup = speedup_weights.exists() and forward_projection
+        if speedup_weights:
+            perform_speedup = speedup_weights.exists() and forward_projection
+        else:
+            perform_speedup = False
         if not dry_run and perform_speedup:
             logger.info(
                 f"Perform simulation speedup. Load speedup model from {speedup_weights}"
@@ -560,6 +563,7 @@ def run(
             speedup_projections = speedup.execute(
                 low_photon=low_photon_projections_filepath,
                 forward_projection=forward_projection_filepath,
+                batch_size=1,
             )
             speedup_projections_filepath = (
                 simulation_folder
