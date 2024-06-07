@@ -33,7 +33,21 @@ Both the MC as well as the reconstruction code are shipped as pre-compiled binar
 - [Nvidia Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 - [Python 3.11 or later](https://docs.conda.io/projects/miniconda/en/latest/)
 
+### Building the Docker image
+The Docker image can be built using the following command:
 
+```bash
+sh ./build-docker.sh
+```
+This will build the Docker image with the name `cbct-mc` and the tag `latest`.
+
+### Installing the Python package
+The Python package can be installed using the following command:
+
+```bash
+pip install -e .
+```
+Make sure to execute this command in the root directory of the repository (where the `setup.py` file is located).
 
 ## Usage
 ### Data preparation
@@ -63,7 +77,9 @@ Options:
                                   Number of histories for reference simulation
                                   [default: 11903320312]
   --speedups FLOAT                Speedup factors for simulation
-  --speedup-weights FILE          Weights file for speedup model
+  --speedup-weights FILE          Weights file for speedup model  [default:
+                                  /home/fmadesta/research/4d-cbct-
+                                  mc/cbctmc/assets/models/speedup/default.pth]
   --segmenter-weights FILE        Weights file for the segmenter model
   --segmenter-patch-shape <INTEGER INTEGER INTEGER>...
                                   Patch shape for the segmenter model
@@ -97,12 +113,12 @@ Options:
   --loglevel [debug|info|warning|error|critical]
                                   Logging level  [default: info]
   --help                          Show this message and exit.
+
 ```
 
 
 ### 3D CBCT simulation
 A 3D CBCT simulation is defined by the static (patient) geometry and the moving CBCT scan geometry (i.e. X-ray source and detector).
-
 
 ### 4D CBCT simulation
 Analog to the 3D CBCT simulation, a 4D CBCT simulation is defined by the time-resolved/dynamic (patient) geometry and the moving CBCT scan geometry (i.e. X-ray source and detector). In addition, a 4D CBCT simulation requires a correspondence model and a respiratory signal. Thus, the `run-mc` command has to be called with the `--correspondence-model` and `--respiratory-signal` arguments. The correspondence model can be fitted using the `fit-correspondence-model` command (see below). The respiratory signal can be obtained from a 4D CT scan.

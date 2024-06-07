@@ -9,6 +9,7 @@ from typing import List, Sequence, Tuple
 
 import click
 import numpy as np
+import pkg_resources
 import SimpleITK
 import torch
 import yaml
@@ -41,6 +42,14 @@ from cbctmc.mc.simulation import MCSimulation, MCSimulation4D
 from cbctmc.segmentation.labels import LABELS
 from cbctmc.segmentation.segmenter import MCSegmenter
 from cbctmc.speedup.models import FlexUNet
+
+_DEFAULT_SEGMENTER_WEIGHTS = Path(
+    pkg_resources.resource_filename("cbctmc", f"assets/models/segmenter/default.pth")
+)
+
+_DEFAULT_SPEEDUP_WEIGHTS = Path(
+    pkg_resources.resource_filename("cbctmc", f"assets/models/speedup/default.pth")
+)
 
 
 def _reconstruct_mc_simulation(
@@ -144,7 +153,7 @@ def _reconstruct_mc_simulation(
 @click.option(
     "--speedup-weights",
     type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
-    default=None,
+    default=_DEFAULT_SPEEDUP_WEIGHTS,
     show_default=True,
     help="Weights file for speedup model",
 )
@@ -152,6 +161,7 @@ def _reconstruct_mc_simulation(
     "--segmenter-weights",
     type=click.Path(file_okay=True, dir_okay=False, exists=True, path_type=Path),
     help="Weights file for the segmenter model",
+    default=_DEFAULT_SEGMENTER_WEIGHTS,
 )
 @click.option(
     "--segmenter-patch-shape",
@@ -242,7 +252,7 @@ def run(
     reference_n_histories: int,
     speedups: List[int],
     speedup_weights: Path | None,
-    segmenter_weights: Path,
+    segmenter_weights: Path | None,
     segmenter_patch_shape: Tuple[int, int, int],
     segmenter_patch_overlap: float,
     n_projections: int,
@@ -267,6 +277,12 @@ def run(
     logger = logging.getLogger(__name__)
     logger.setLevel(loglevel)
     init_fancy_logging()
+
+    if speedups:
+        if not forward_projection:
+            raise ValueError("Speedup requires forward projection")
+        if not speedup_weights:
+            raise ValueError("Speedup requires weights file")
 
     CONFIGS = {}
     if reference:
@@ -539,10 +555,8 @@ def run(
                 str(simulation_folder / config_name / "density_fp_4d.mha"),
             )
 
-        if speedup_weights:
-            perform_speedup = speedup_weights.exists() and forward_projection
-        else:
-            perform_speedup = False
+        perform_speedup = "speedup" in config_name
+
         if not dry_run and perform_speedup:
             logger.info(
                 f"Perform simulation speedup. Load speedup model from {speedup_weights}"
