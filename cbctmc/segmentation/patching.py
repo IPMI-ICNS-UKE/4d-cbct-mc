@@ -192,8 +192,8 @@ class PatchExtractor:
 
     def correct_index(self, index: Tuple[int, ...]):
         index = list(index)
-        low_corrections = tuple(int(idx) - l for idx, l in zip(index, self.min_lower_index))
-        high_corrections = tuple(int(idx) - h for idx, h in zip(index, self.max_upper_index))
+        low_corrections = tuple(idx - l for idx, l in zip(index, self.min_lower_index))
+        high_corrections = tuple(idx - h for idx, h in zip(index, self.max_upper_index))
 
         if all(lc == 0 for lc in low_corrections) and all(
             hc == 0 for hc in high_corrections

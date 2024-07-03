@@ -43,19 +43,12 @@ from cbctmc.segmentation.labels import LABELS
 from cbctmc.segmentation.segmenter import MCSegmenter
 from cbctmc.speedup.models import FlexUNet
 
-#_DEFAULT_SEGMENTER_WEIGHTS = Path(
-#    pkg_resources.resource_filename("cbctmc", f"assets/models/segmenter/default.pth")
-#)
-
-#_DEFAULT_SPEEDUP_WEIGHTS = Path(
-#    pkg_resources.resource_filename("cbctmc", f"assets/models/speedup/default.pth")
-#)
-
 _DEFAULT_SEGMENTER_WEIGHTS = Path(
-    pkg_resources.resource_filename("cbctmc", f"assets/weights/segmenter/default.pth")
+    pkg_resources.resource_filename("cbctmc", f"assets/models/segmenter/default.pth")
 )
+
 _DEFAULT_SPEEDUP_WEIGHTS = Path(
-    pkg_resources.resource_filename("cbctmc", f"assets/weights/speedup/default.pth")
+    pkg_resources.resource_filename("cbctmc", f"assets/models/speedup/default.pth")
 )
 
 
@@ -80,9 +73,7 @@ def _reconstruct_mc_simulation(
             geometry_filepath=simulation_folder / "geometry.xml",
             output_folder=(simulation_folder / config_name / "reconstructions"),
             output_filename=f"fdk3d_wpc{suffix}.mha",
-            #dimension=(464, 250, 464),
-            dimension=(512,159,512),
-            spacing=(0.9766, 2, 0.9766),
+            dimension=(464, 250, 464),
             water_pre_correction=ReconDefaults.wpc_catphan604,
             gpu_id=gpu_id,
         )
@@ -101,8 +92,7 @@ def _reconstruct_mc_simulation(
             geometry_filepath=simulation_folder / "geometry.xml",
             output_folder=(simulation_folder / config_name / "reconstructions"),
             output_filename=f"rooster4d_wpc{suffix}.mha",
-            dimension=(512,159,512),
-            spacing= (0.9766,2,0.9766),
+            dimension=(464, 250, 464),
             water_pre_correction=ReconDefaults.wpc_catphan604,
             gpu_id=gpu_id,
         )
@@ -395,8 +385,9 @@ def run(
         geometry_class = MCCIRSPhantomGeometry
     else:
         geometry_class = MCGeometry
-    
+
     image_folder = image_filepath.parent
+
     logger.info(f"Prepare simulation for image {image_filepath}")
 
     if not simulation_name:
@@ -437,8 +428,7 @@ def run(
             geometry = geometry_class.from_image(
                 image_filepath=image_filepath,
                 segmenter=segmenter,
-                #image_spacing=(1.0, 1.0, 1.0),
-                image_spacing=(0.9766, 0.9766, 2) #original spacing (if corr mod fitted on original spacing)+
+                image_spacing=(1.0, 1.0, 1.0),
             )
 
         geometry.save_material_segmentation(

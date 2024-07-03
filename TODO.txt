@@ -1,9 +1,0 @@
-> create CIRS phantom for different phases
-	>SEE geometry.py
-	>p = MCCIRSPhantomGeometry.from_base_geometry()
-	>#insert target p.place_insert(shift = ...)
-	> --> fit corr model --> DEBUGGING
-
-> reduce #iterations for corr mod (>100, <<800) --> speed up
-> used speedup~10 and not reference --> speedup
-> use lung mask --> speed up corr model

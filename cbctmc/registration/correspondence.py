@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import pickle
 from functools import cached_property
 from hashlib import sha256
@@ -47,11 +46,11 @@ class CorrespondenceModel:
 
         hasher = sha256()
         hasher.update(self.coefficients.tobytes())
-        hasher.update(self.timesteps.to_bytes(length= 2, byteorder="big"))
+        hasher.update(self.timesteps.to_bytes())
         hasher.update(self.mean_signal.tobytes())
         hasher.update(self.mean_vector_field.tobytes())
         hasher.update(self.signals.tobytes())
-        hasher.update(self.reference_phase.to_bytes(length= 2, byteorder="big"))
+        hasher.update(self.reference_phase.to_bytes())
 
         return hasher.hexdigest()
 
@@ -285,9 +284,6 @@ class CorrespondenceModel:
         device: str = "cuda",
         reference_phase: int = 2,
         masked_registration: bool = True,
-        save_vf: bool = True,
-        vf_dir: os.PathLike | None = None,
-        overwrite_vf: bool = True
     ):
         """Build a default correspondence model using the images, masks and
         signal."""
@@ -315,49 +311,42 @@ class CorrespondenceModel:
 
             else:
                 raise ValueError("Either signals or masks must be given")
-        if not os.path.isfile(os.path.join(vf_dir, f"vfs.npy")) or overwrite_vf:
-            registration = VrocRegistration(
-                device=device,
+
+        registration = VrocRegistration(
+            device=device,
+        )
+
+        vector_fields = []
+
+        for data in as_registration_from_reference(
+            images, masks=masks, reference_index=reference_phase
+        ):
+            registration_result = registration.register(
+                moving_image=data["moving_image"],
+                fixed_image=data["fixed_image"],
+                moving_mask=data["moving_mask"] if masked_registration else None,
+                fixed_mask=data["fixed_mask"] if masked_registration else None,
+                register_affine=False,
+                default_parameters={
+                    "iterations": 800,
+                    "tau": 2.25,
+                    "tau_level_decay": 0.0,
+                    "tau_iteration_decay": 0.0,
+                    "sigma_x": 1.25,
+                    "sigma_y": 1.25,
+                    "sigma_z": 1.25,
+                    "sigma_level_decay": 0.0,
+                    "sigma_iteration_decay": 0.0,
+                    "n_levels": 3,
+                    "largest_scale_factor": 1.0,
+                },
             )
 
-            vector_fields = []
+            vector_fields.append(registration_result.composed_vector_field)
 
-            for i, data in enumerate(as_registration_from_reference(
-                images, masks=masks, reference_index=reference_phase
-            )):
-                print(f"Start registration: ref_phase {reference_phase}, {i+1}/{len(images)}")
-                registration_result = registration.register(
-                    moving_image=data["moving_image"],
-                    fixed_image=data["fixed_image"],
-                    moving_mask=data["moving_mask"] if masked_registration else None,
-                    fixed_mask=data["fixed_mask"] if masked_registration else None,
-                    register_affine=False,
-                    default_parameters={
-                        "iterations": 200,#800,
-                        "tau": 2.25,
-                        "tau_level_decay": 0.0,
-                        "tau_iteration_decay": 0.0,
-                        "sigma_x": 1.25,
-                        "sigma_y": 1.25,
-                        "sigma_z": 1.25,
-                        "sigma_level_decay": 0.0,
-                        "sigma_iteration_decay": 0.0,
-                        "n_levels": 3,
-                        "largest_scale_factor": 1.0,
-                    },
-                )
-
-                vector_fields.append(registration_result.composed_vector_field)
-
-
-            vector_fields = np.stack(vector_fields, axis=0)
-            if save_vf:
-                np.save(os.path.join(vf_dir, f"vfs.npy"), vector_fields)
-        else:
-            vector_fields = np.load(os.path.join(vf_dir, f"vfs.npy"))
+        vector_fields = np.stack(vector_fields, axis=0)
 
         correspondence_model = cls()
-        print("Fit correspondence model")
         correspondence_model.fit(
             vector_fields=vector_fields,
             signals=signals,
