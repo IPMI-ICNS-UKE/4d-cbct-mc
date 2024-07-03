@@ -112,7 +112,7 @@ def reconstruct_4d(
         cgiter=4,
         tviter=10,
         gamma_time=0.0002,
-        gamma_space=0.00007,
+        gamma_space=0.00005,
         dimension=dimension,
         spacing=spacing,
         wpc=water_pre_correction,

@@ -1,175 +1,44 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from math import floor
-from typing import Any, List, Sequence, Tuple
+import warnings
+from typing import Any, List, Tuple
 
 import numpy as np
 
-from cbctmc.utils import rescale_range
-
-
-class BaseIndexer(ABC):
-    @abstractmethod
-    def calculate_index(self, reference_index: Tuple[int, ...]) -> Tuple[int, ...]:
-        """Calculates one index/multiple indices based on one reference index.
-
-        :param reference_index:
-        :return:
-        """
-
-
-class SingleScaleIndexer(BaseIndexer):
-    def calculate_index(self, reference_index: Tuple[int, ...]) -> Tuple[int, ...]:
-        return reference_index
-
-
-class MultiScaleIndexer(BaseIndexer):
-    def __init__(
-        self,
-        array_shapes: Tuple[Tuple[int, ...], ...],
-        reference_array_shape: Tuple[int, ...] = None,
-    ):
-        self.array_shapes = array_shapes
-        if not reference_array_shape:
-            reference_array_shape = array_shapes[0]
-        self.reference_array_shape = reference_array_shape
-
-    def calculate_index(
-        self, reference_index: Tuple[int, ...]
-    ) -> Tuple[Tuple[int, ...], ...]:
-        multi_scale_indices = []
-        for array_shape in self.array_shapes:
-            scaled_index = []
-            if array_shape == self.reference_array_shape:
-                scaled_index = reference_index
-            else:
-                for idx, upper_bound, ref_upper_bound in zip(
-                    reference_index, array_shape, self.reference_array_shape
-                ):
-                    scaled_idx = int(
-                        floor(
-                            rescale_range(idx, (0, ref_upper_bound), (0, upper_bound))
-                        )
-                    )
-                    scaled_index.append(scaled_idx)
-            multi_scale_indices.append(tuple(scaled_index))
-        return tuple(multi_scale_indices)
-
-
-class PatchStitcher:
-    def __init__(
-        self,
-        array_shape: Tuple[int, ...],
-        color_axis: int = 0,
-        dtype=np.float32,
-        max_expected_overlap: int = 255,
-    ):
-        self.array_shape = array_shape
-        self.color_axis = color_axis
-
-        self.dtype = dtype
-        self.max_expected_overlap = max_expected_overlap
-        if self.max_expected_overlap < 2**8:
-            self._n_dtype = np.uint8
-        elif self.max_expected_overlap < 2**16:
-            self._n_dtype = np.uint16
-        else:
-            self._n_dtype = np.uint32
-        self._hard_overlap_limit = np.iinfo(self._n_dtype).max
-        self._unsigned_dtype = None
-
-        self.n_patches_added = 0
-
-        self.reset()
-
-    @property
-    def array_shape(self):
-        return self.__array_shape
-
-    @array_shape.setter
-    def array_shape(self, value):
-        self.__array_shape = value
-
-    @property
-    def color_axis(self):
-        return self.__color_axis
-
-    @color_axis.setter
-    def color_axis(self, value):
-        if value is None:
-            self.__color_axis = value
-        else:
-            assert -self.n_total_dims <= value < self.n_total_dims
-            self.__color_axis = value if value >= 0 else value + self.n_total_dims
-
-    @property
-    def n_total_dims(self):
-        return len(self.array_shape)
-
-    def reset(self):
-        self.k = np.zeros(self.array_shape, dtype=self.dtype)
-        self.n = np.zeros(self.array_shape, dtype=self._n_dtype)
-        self.sum = np.zeros(self.array_shape, dtype=self.dtype)
-        self.sum_squared = np.zeros(
-            self.array_shape, dtype=self._unsigned_dtype or self.dtype
-        )
-
-        self.n_patches_added = 0
-
-    def print_internal_stats(self):
-        stats = (
-            f"internal min/max stats:\n"
-            f"n: min={self.n.min()}, max={self.n.max()}\n"
-            f"k: min={self.k.min()}, max={self.k.max()}\n"
-            f"sum: min={self.sum.min()}, max={self.sum.max()}\n"
-            f"sum_squared: min={self.sum_squared.min()}, max={self.sum_squared.max()}"
-        )
-        print(stats)
-
-    @property
-    def coverage(self):
-        return self.n
-
-    def add_patch(self, data: np.ndarray, slicing: Tuple[slice, ...]):
-        with np.errstate(over="raise", under="raise"):
-            n_masking = self.n[slicing] == 0
-            self.k[slicing][n_masking] = data[n_masking]
-            self.n[slicing] += 1
-            diff = data - self.k[slicing]
-
-            self.sum[slicing] += diff
-            self.sum_squared[slicing] += diff**2
-
-    def add_patches(
-        self, data: Sequence[np.ndarray], slicings: Sequence[Tuple[slice, ...]]
-    ):
-        for patch, slicing in zip(data, slicings):
-            self.add_patch(patch, slicing)
-
-    def calculate_mean(self, default_value: float = 0.0):
-        with np.errstate(divide="ignore", invalid="ignore"):
-            return np.nan_to_num(self.k + self.sum / self.n, nan=default_value)
-
-    def calculate_variance(self, ddof: int = 0):
-        return (self.sum_squared - self.sum**2 / self.n) / (self.n - ddof)
+from vroc.patching.indexer import MultiScaleIndexer, SingleScaleIndexer
 
 
 class PatchExtractor:
     def __init__(
         self,
-        patch_shape: Tuple[int, ...],
+        patch_shape: Tuple[int, ...] | None,
         array_shape: Tuple[int, ...],
         color_axis: int | None = 0,
         indexer: SingleScaleIndexer | MultiScaleIndexer = None,
     ):
         self.array_shape = array_shape
         self.color_axis = color_axis
-        self.patch_shape = patch_shape
+        # patch must be <= array shape
+        self.patch_shape = self._get_patch_shape(patch_shape)
 
         if not indexer:
             indexer = SingleScaleIndexer()
         self.indexer = indexer
+
+    def _get_patch_shape(self, patch_shape: Tuple[int, ...]):
+        if patch_shape is None:
+            _patch_shape = self.array_shape
+        else:
+            _patch_shape = tuple(
+                min(p_s, a_s) for p_s, a_s in zip(patch_shape, self.array_shape)
+            )
+
+            if _patch_shape != patch_shape:
+                warnings.warn(
+                    f"Given patch shape of {patch_shape} was reduced to {_patch_shape} fit array shape of {self.array_shape}"
+                )
+
+        return _patch_shape
 
     def central_to_lower_index(
         self, central_index: Tuple[int, ...], correct: bool = True
@@ -192,13 +61,13 @@ class PatchExtractor:
 
     def correct_index(self, index: Tuple[int, ...]):
         index = list(index)
-        low_corrections = tuple(int(idx) - l for idx, l in zip(index, self.min_lower_index))
-        high_corrections = tuple(int(idx) - h for idx, h in zip(index, self.max_upper_index))
+        low_corrections = tuple(idx - l for idx, l in zip(index, self.min_lower_index))
+        high_corrections = tuple(idx - h for idx, h in zip(index, self.max_upper_index))
 
         if all(lc == 0 for lc in low_corrections) and all(
             hc == 0 for hc in high_corrections
         ):
-            return index
+            return tuple(index)
 
         for i_dim, low_correction in enumerate(low_corrections):
             if low_correction < 0:
@@ -313,7 +182,11 @@ class PatchExtractor:
         indices = np.concatenate(
             tuple(m[..., np.newaxis] for m in mesh), axis=-1
         ).reshape((-1, len(self.spatial_dims)))
-        return [self.correct_index(idx) for idx in indices]
+        indices = [self.correct_index(idx) for idx in indices]
+        # remove duplicates while keeping order
+        indices = list(dict.fromkeys(indices))
+
+        return indices
 
     def _calculate_multi_scale_slicings(self, reference_slicing: Tuple[slice, ...]):
         if isinstance(self.indexer, SingleScaleIndexer):
@@ -368,14 +241,3 @@ class PatchExtractor:
                 if not mask[spatial_slicing].any():
                     continue
             yield self._calculate_multi_scale_slicings(slicing)
-
-
-if __name__ == "__main__":
-    ps = PatchStitcher(array_shape=(1, 100, 200, 300), color_axis=0)
-    ps.add_patch(np.ones((1, 10, 20, 30)), slicing=np.index_exp[:, :10, :20, :30])
-
-    extractor = PatchExtractor(
-        patch_shape=(10, 20, 30),
-        array_shape=(1, 500, 500, 300),
-        color_axis=0,
-    )
