@@ -1,18 +1,18 @@
 # 4D CBCT Monte Carlo Simulation
-This repository contains the official code for the following [paper](https://rdcu.be/baQa3):
+This repository contains the official code for the following [paper](https://doi.org/10.1016/j.phro.2024.100644):
 
 ```
 @article{madesta:2024,
-    doi = {XXX},
+    doi = {10.1016/j.phro.2024.100644},
     year = {2024},
-    month = {XXX},
-    publisher = {XXX},
-    volume = {XXX},
-    number = {XXX},
-    pages = {XXX},
+    month = {TBA},
+    publisher = {Elsevier},
+    volume = {TBA},
+    number = {TBA},
+    pages = {TBA},
     author = {Frederic Madesta, Thilo Sentker, Clemens Rohling, Tobias Gauer, and Ren\'{e} Werner},
-    title = {Monte Carlo-based simulation of virtual 3D and 4D Cone-Beam CT from CT images: An end-to-end framework and a novel deep learning-based speedup strategy},
-    journal = {XXX}
+    title = {Monte Carlo-based simulation of virtual 3 and 4-dimensional cone-beam computed tomography from computed tomography images: An end-to-end framework and a deep learning-based speedup strategy},
+    journal = {Physics and Imaging in Radiation Oncology}
 }
 
 ```
