@@ -2,19 +2,19 @@
 This repository contains the official code for the following [paper](https://doi.org/10.1016/j.phro.2024.100644):
 
 ```
-@article{madesta:2024,
-    doi = {10.1016/j.phro.2024.100644},
-    year = {2024},
-    month = {TBA},
-    publisher = {Elsevier},
-    volume = {TBA},
-    number = {TBA},
-    pages = {TBA},
-    author = {Frederic Madesta, Thilo Sentker, Clemens Rohling, Tobias Gauer, and Ren\'{e} Werner},
-    title = {Monte Carlo-based simulation of virtual 3 and 4-dimensional cone-beam computed tomography from computed tomography images: An end-to-end framework and a deep learning-based speedup strategy},
-    journal = {Physics and Imaging in Radiation Oncology}
+@article{madesta2024,
+  title = {Monte Carlo-based simulation of virtual 3 and 4-dimensional cone-beam computed tomography from computed tomography images: An end-to-end framework and a deep learning-based speedup strategy},
+  volume = {32},
+  ISSN = {2405-6316},
+  url = {http://dx.doi.org/10.1016/j.phro.2024.100644},
+  DOI = {10.1016/j.phro.2024.100644},
+  journal = {Physics and Imaging in Radiation Oncology},
+  publisher = {Elsevier BV},
+  author = {Madesta, Frederic and Sentker, Thilo and Rohling, Clemens and Gauer, Tobias and Schmitz, R\"{u}diger and Werner, René},
+  year = {2024},
+  month = oct,
+  pages = {100644}
 }
-
 ```
 ## Overview
 This package contains all the required code to perform the following tasks in a fully automated end-to-end fashion:
