@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.3.1-devel-ubuntu20.04
+FROM nvidia/cuda:12.3.2-devel-ubuntu22.04
 
 LABEL maintainer="f.madesta@uke.de"
 

@@ -1,8 +1,6 @@
 import os
 from pathlib import Path
 
-import torch
-
 # order GPU ID by PCI bus ID
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 import logging
@@ -15,7 +13,6 @@ from cbctmc.defaults import DefaultReconstructionParameters as ReconDefaults
 from cbctmc.logger import init_fancy_logging
 from cbctmc.reconstruction.reconstruction import reconstruct_3d, reconstruct_4d
 from cbctmc.speedup.inference import MCSpeedup
-from cbctmc.speedup.metrics import psnr
 
 if __name__ == "__main__":
     init_fancy_logging()
@@ -26,13 +23,16 @@ if __name__ == "__main__":
     logging.getLogger("cbctmc").setLevel(logging.DEBUG)
 
     SPEEDUP_MODES = [
-        "speedup_10.00x",
+        # "speedup_10.00x",
         "speedup_20.00x",
         # "speedup_50.00x",
     ]
 
     # mean model + var model more training (works)
     MODEL = "/datalake3/speedup_runs_all_speedups/2024-01-17T18:17:39.555467_run_f28354c2c6484ce5a7b5a783/models/training/step_20000.pth"
+    MODEL = (
+        "/home/fmadesta/research/4d-cbct-mc/cbctmc/assets/weights/speedup/default.pth"
+    )
 
     USE_FORWARD_PROJECTION = True
     GPU_ID = 1
@@ -85,7 +85,7 @@ if __name__ == "__main__":
             # )
 
             patient_folder = Path(
-                f"/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc_010lung/ct_rai/phase_02"
+                "/mnt/nas_io/anarchy/4d_cbct_mc/4d/R2017025/mc_010lung/ct_rai/phase_02"
             )
 
             # patient_folder = Path("/mnt/nas_io/anarchy/4d_cbct_mc/4d/024_4DCT_Lunge_amplitudebased_complete/phase_02")
@@ -105,9 +105,9 @@ if __name__ == "__main__":
             if not (
                 forward_projection_filepath := patient_folder
                 / speedup_mode
-                / f"density_fp_4d.mha"
+                / "density_fp_4d.mha"
             ).exists():
-                forward_projection_filepath = patient_folder / f"density_fp.mha"
+                forward_projection_filepath = patient_folder / "density_fp.mha"
 
             logger.info(f"Load forward projection from {forward_projection_filepath}")
             forward_projection = sitk.ReadImage(str(forward_projection_filepath))
@@ -135,7 +135,7 @@ if __name__ == "__main__":
                 str(
                     patient_folder
                     / speedup_mode
-                    / f"projections_total_normalized_speedup.mha"
+                    / "projections_total_normalized_speedup.mha"
                 ),
             )
 
