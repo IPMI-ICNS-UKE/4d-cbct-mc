@@ -10,7 +10,7 @@ from typing import List, Sequence, Tuple
 import click
 import numpy as np
 import pkg_resources
-import SimpleITK
+import SimpleITK as sitk
 import torch
 import yaml
 from ipmi.common.logger import init_fancy_logging
@@ -44,11 +44,11 @@ from cbctmc.segmentation.segmenter import MCSegmenter
 from cbctmc.speedup.models import FlexUNet
 
 _DEFAULT_SEGMENTER_WEIGHTS = Path(
-    pkg_resources.resource_filename("cbctmc", f"assets/models/segmenter/default.pth")
+    pkg_resources.resource_filename("cbctmc", f"assets/weights/segmenter/default.pth")
 )
 
 _DEFAULT_SPEEDUP_WEIGHTS = Path(
-    pkg_resources.resource_filename("cbctmc", f"assets/models/speedup/default.pth")
+    pkg_resources.resource_filename("cbctmc", f"assets/weights/speedup/default.pth")
 )
 
 
@@ -584,7 +584,7 @@ def run(
                 / config_name
                 / "projections_total_normalized_speedup.mha"
             )
-            itk.imwrite(speedup_projections, str(speedup_projections_filepath))
+            sitk.WriteImage(speedup_projections, str(speedup_projections_filepath))
 
         if not dry_run:
             reconstruct_4d = is_4d and reconstruct_4d
