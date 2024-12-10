@@ -6,7 +6,7 @@ from math import ceil
 from pathlib import Path
 from typing import Tuple
 
-import itk
+import SimpleITK as sitk
 import numpy as np
 import torch
 from ipmi.common.logger import init_fancy_logging
@@ -85,12 +85,12 @@ class MCSpeedup(ForwardPassMixin):
 
     @staticmethod
     def _load_image(filepath: PathLike) -> Tuple[np.ndarray, dict]:
-        image = itk.imread(filepath)
+        image = sitk.ReadImage(filepath)
         spacing = image.GetSpacing()
         origin = image.GetOrigin()
         direction = image.GetDirection()
 
-        image = itk.array_from_image(image)
+        image = sitk.GetArrayFromImage(image)
 
         meta = {
             "spacing": spacing,
@@ -125,7 +125,7 @@ class MCSpeedup(ForwardPassMixin):
                 batch_size=batch_size,
             )
 
-            sample = itk.image_from_array(sample)
+            sample = sitk.GetImageFromArray(sample)
             sample.SetSpacing(meta["spacing"])
             sample.SetOrigin(meta["origin"])
             sample.SetDirection(meta["direction"])
